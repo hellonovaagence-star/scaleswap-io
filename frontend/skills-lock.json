@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "reelclaw": {
+      "source": "dansugc/reelclaw",
+      "sourceType": "github",
+      "computedHash": "e4e9060f37b1a05439900604e8a3b6b5a66e8cf1f0dc7c098a09148ad7c8433a"
+    }
+  }
+}

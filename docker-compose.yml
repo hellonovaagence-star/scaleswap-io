@@ -1,0 +1,45 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - SCALESWAP_REDIS_URL=redis://redis:6379/0
+      - SCALESWAP_UPLOAD_DIR=/data/uploads
+      - SCALESWAP_OUTPUT_DIR=/data/outputs
+    volumes:
+      - scaleswap-data:/data
+    depends_on:
+      - redis
+
+  worker:
+    build: ./backend
+    command: rq worker scaleswap --url redis://redis:6379/0
+    environment:
+      - SCALESWAP_REDIS_URL=redis://redis:6379/0
+      - SCALESWAP_UPLOAD_DIR=/data/uploads
+      - SCALESWAP_OUTPUT_DIR=/data/outputs
+    volumes:
+      - scaleswap-data:/data
+    depends_on:
+      - redis
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api
+    depends_on:
+      - backend
+
+volumes:
+  redis-data:
+  scaleswap-data:

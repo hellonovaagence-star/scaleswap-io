@@ -1,0 +1,270 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@font-face {
+  font-family: 'TikTok Sans';
+  src: url('/fonts/TikTokSans-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+/*
+  ---break---
+*/
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --color-bg: #FAFAF7;
+  --color-surface: #FFFFFF;
+  --color-surface-2: #F4F2ED;
+  --color-surface-3: #EEEBE3;
+  --color-border: #EAE7E0;
+  --color-border-soft: #F0EDE6;
+  --color-ink: #0B0B0A;
+  --color-ink-2: #2A2A28;
+  --color-muted: #75736C;
+  --color-muted-2: #9A988F;
+
+  --color-accent: #8B7FFF;
+  --color-accent-hover: #6F5FE8;
+  --color-accent-soft: #F0EDFF;
+  --color-accent-soft-2: #E5E0FF;
+  --color-accent-ring: rgba(139, 127, 255, 0.22);
+
+  --color-green: #3DBF6B;
+  --color-green-soft: #E5F7EC;
+  --color-amber: #F0B84E;
+  --color-amber-soft: #FDF3DC;
+  --color-red: #E25C5C;
+  --color-red-soft: #FCE8E8;
+
+  --font-sans: 'Inter', -apple-system, system-ui, sans-serif;
+  --font-serif: 'Instrument Serif', Georgia, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+@theme {
+  --color-bg: #FAFAF7;
+  --color-surface: #FFFFFF;
+  --color-surface-2: #F4F2ED;
+  --color-surface-3: #EEEBE3;
+  --color-border: #EAE7E0;
+  --color-border-soft: #F0EDE6;
+  --color-ink: #0B0B0A;
+  --color-ink-2: #2A2A28;
+  --color-muted: #75736C;
+  --color-muted-2: #9A988F;
+
+  --color-accent: #8B7FFF;
+  --color-accent-hover: #6F5FE8;
+  --color-accent-soft: #F0EDFF;
+  --color-accent-soft-2: #E5E0FF;
+  --color-accent-ring: rgba(139, 127, 255, 0.22);
+
+  --color-green: #3DBF6B;
+  --color-green-soft: #E5F7EC;
+  --color-amber: #F0B84E;
+  --color-amber-soft: #FDF3DC;
+  --color-red: #E25C5C;
+  --color-red-soft: #FCE8E8;
+
+  --font-sans: 'Inter', -apple-system, system-ui, sans-serif;
+  --font-serif: 'Instrument Serif', Georgia, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/*
+  DO NOT add *, a, button, or input resets here.
+  Tailwind v4 preflight already handles them inside @layer base.
+  Any unlayered rules here would OVERRIDE all Tailwind utilities.
+*/
+
+html, body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Pointer cursor on all clickable elements */
+a, button, [role="button"], input[type="submit"], input[type="button"], input[type="reset"], select, label[for], summary { cursor: pointer; }
+
+/* Smooth theme transition */
+html.transitioning, html.transitioning * {
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease !important;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-muted-2); }
+
+/* Pulse animation */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.animate-pulse-dot { animation: pulse-dot 1.5s ease-in-out infinite; }
+
+/* Page transition fade-in */
+@keyframes page-fade-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-page-fade { animation: page-fade-in 180ms ease-out both; }
+/*
+  ---break---
+*/
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --font-mono: var(--font-geist-mono);
+}
+/*
+  ---break---
+*/
+.dark {
+  --color-bg: #131313;
+  --color-surface: #1A1A1A;
+  --color-surface-2: #222222;
+  --color-surface-3: #2A2A2A;
+  --color-border: #2E2E2E;
+  --color-border-soft: #252525;
+  --color-ink: #EDEDEC;
+  --color-ink-2: #C8C8C5;
+  --color-muted: #8A8883;
+  --color-muted-2: #5F5D58;
+
+  --color-accent: #9B91FF;
+  --color-accent-hover: #B0A5FF;
+  --color-accent-soft: rgba(139, 127, 255, 0.12);
+  --color-accent-soft-2: rgba(139, 127, 255, 0.18);
+  --color-accent-ring: rgba(139, 127, 255, 0.25);
+
+  --color-green: #4DD67E;
+  --color-green-soft: rgba(61, 191, 107, 0.12);
+  --color-amber: #F0B84E;
+  --color-amber-soft: rgba(240, 184, 78, 0.12);
+  --color-red: #F07070;
+  --color-red-soft: rgba(226, 92, 92, 0.12);
+
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+/*
+  ---break---
+*/
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
