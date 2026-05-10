@@ -1,5 +1,5 @@
 # --- Stage 1: Build ---
-FROM node:20-bookworm-slim AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -16,21 +16,16 @@ ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
 RUN npm run build
 
 # --- Stage 2: Runtime ---
-FROM node:20-bookworm-slim
+FROM node:20-alpine
 
-# Install only runtime deps: FFmpeg + Chromium + emoji font
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    chromium \
-    fonts-noto-color-emoji \
-    && rm -rf /var/lib/apt/lists/*
+# Install FFmpeg + Chromium + emoji font (Alpine packages are much smaller)
+RUN apk add --no-cache ffmpeg chromium noto-fonts-emoji
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV CHROME_PATH=/usr/bin/chromium
+ENV CHROME_PATH=/usr/bin/chromium-browser
 
 WORKDIR /app
 
-# Copy only what's needed to run
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
