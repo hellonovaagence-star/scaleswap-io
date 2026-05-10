@@ -12,7 +12,7 @@
 
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { FFMPEG_PATH } from "./ffmpeg-path";
+import { resolveFfmpegPath } from "./ffmpeg-path";
 
 const execFileAsync = promisify(execFile);
 
@@ -24,7 +24,7 @@ export async function extractFrame(
   outputPath: string,
   offsetSec: number = 0.5,
 ): Promise<void> {
-  await execFileAsync(FFMPEG_PATH, [
+  await execFileAsync(resolveFfmpegPath(), [
     "-y",
     "-ss", String(offsetSec),
     "-i", videoPath,

@@ -70,6 +70,7 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
   const [genCaptionMode, setGenCaptionMode] = useState<"none" | "single" | "group">("none");
   const [genCaptionId, setGenCaptionId] = useState("");
   const [genCaptionGroupId, setGenCaptionGroupId] = useState("");
+  const [genMirror, setGenMirror] = useState(false);
   const supabase = createClient();
 
   const fetchData = useCallback(async () => {
@@ -227,6 +228,7 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
           captionId: genCaptionMode === "single" && genCaptionId ? genCaptionId : undefined,
           captionGroupId: genCaptionMode === "group" && genCaptionGroupId ? genCaptionGroupId : undefined,
           projectType: project.type === "image" ? "image" : "video",
+          mirrorEnabled: genMirror,
         }),
       }).then(async (res) => {
         if (!res.ok) console.error("[generate] API error:", res.status, await res.text().catch(() => ""));
@@ -824,6 +826,38 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
                 onCaptionSelect={(id) => setGenCaptionId(id)}
                 onGroupSelect={(id) => setGenCaptionGroupId(id)}
               />
+            </div>
+
+            {/* Mirror toggle */}
+            <div className="mb-5">
+              <button
+                onClick={() => setGenMirror(!genMirror)}
+                className="w-full flex items-center justify-between px-3 py-2.5 rounded-[10px] border transition-all"
+                style={{
+                  background: genMirror ? "var(--color-accent-soft)" : "var(--color-surface-2)",
+                  borderColor: genMirror ? "var(--color-accent)" : "var(--color-border)",
+                }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: genMirror ? "var(--color-accent-hover)" : "var(--color-muted)" }}>
+                    <path d="M12 3v18M8 7H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h4M16 7h4a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-4"/>
+                  </svg>
+                  <span className="text-[12.5px] font-medium" style={{ color: genMirror ? "var(--color-accent-hover)" : "var(--color-ink-2)" }}>
+                    Effet miroir
+                  </span>
+                </div>
+                <div
+                  className="w-8 h-[18px] rounded-full transition-all relative"
+                  style={{
+                    background: genMirror ? "var(--color-accent)" : "var(--color-border)",
+                  }}
+                >
+                  <div
+                    className="absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white transition-all"
+                    style={{ left: genMirror ? "calc(100% - 16px)" : "2px" }}
+                  />
+                </div>
+              </button>
             </div>
 
             {genError && (

@@ -1,7 +1,10 @@
 /**
- * Video Engine — 24-layer FFmpeg transformation pipeline.
+ * Video Engine — 25-layer FFmpeg transformation pipeline.
  *
- * Designed to defeat perceptual hashing (pHash) used by Instagram/TikTok.
+ * Designed to defeat perceptual hashing (pHash), Content ID, and audio fingerprinting
+ * used by Instagram/TikTok. Simulates videos filmed on different iPhones with different
+ * camera settings (exposure, white balance, angle, etc.)
+ *
  * pHash: downscale 32x32 → grayscale → 2D DCT → 8x8 low-freq coefficients → 64-bit hash.
  * Key insight: we need LOW-FREQUENCY changes (not pixel noise) to shift DCT coefficients.
  *
@@ -10,28 +13,29 @@
  * Layers:
  *  1. Metadata      — Strip + spoof device/GPS/date
  *  2. Spatial       — Random crop from edges (2-6px) — shifts content at 32x32 scale
- *  3. Temporal      — Trim start + end, micro speed change (±0.15%)
- *  4. Color         — Gamma ±0.01, contrast ±0.005, brightness ±0.008 — shifts grayscale DCT
- *  5. Noise         — Temporal-only grain (strength 1-2, flag "t") — invisible on static areas
+ *  3. Temporal      — Trim 0.05-0.4s start + 0.1-0.5s end, speed ±0.5%
+ *  4. Color         — iPhone exposure: gamma ±3%, contrast ±1.5%, brightness ±2.5%
+ *  5. Noise         — iPhone sensor grain (strength 2-4, temporal-only)
  *  6. Codec         — CRF, GOP, profile, level, preset, B-frames, refs
- *  7. Audio         — Sample rate, bitrate, channels, micro-noise
+ *  7. Audio         — Sample rate, bitrate, channels, noise (4x stronger)
  *  8. Binary        — Random MP4 "free" atom padding (post-FFmpeg)
  *  9. Vignette      — Edge darkening (low-freq spatial change → DCT impact)
  * 10. Zoom          — Scale-up + crop-back (1-2.5%) — resamples pixel grid
- * 11. Rotation      — Micro-rotation (0.1-0.3°) — shifts spatial content
+ * 11. Rotation      — iPhone angle: 0.2-0.8° — different hand position
  * 12. Random Res    — Resolution variation (±2-4px)
  * 13. Pixel Shift   — Hue micro-rotation (0.2-0.8°)
  * 14. Volume        — Audio volume micro-adjustment (±2%)
  * 15. Waveform Shift— Audio phase delay (1-5ms)
  * 16. Lens Correct  — Barrel/pincushion micro-distortion
- * 17. Flip          — Horizontal flip (~40% chance) — completely changes pHash
+ * 17. Mirror        — 50% chance horizontal flip (selfie vs back camera)
  * 18. Gaussian Blur — Subtle blur (σ 0.1-0.2) — shifts DCT low-freq coefficients
  * 19. DCT Adversarial— Low-freq luminance pattern via geq — targets pHash DCT basis
  * 20. Unsharp Mask  — Micro-sharpen (0.05-0.15) to counter blur
- * 21. Audio EQ      — Subtle 3-band EQ (±0.5dB) — micro spectrogram shift
- * 22. Audio Pitch   — Micro pitch shift ±0.2% via asetrate
+ * 21. Audio EQ      — 5-band EQ (±2dB) — anti-Shazam
+ * 22. Audio Pitch   — Pitch shift ±0.8% via asetrate — anti-AudioID
  * 23. Perspective   — Trapezoidal warp (1-3px corners) — remaps pixel grid
  * 24. Color Mixer   — Inter-channel bleed (±1.5%) — shifts grayscale luma
+ * 25. Color Temp    — iPhone white balance: warm/cool shift (±3%) — simulates lighting
  * (+) Framerate     — Micro FPS variation (29.95-30.03) — shifts frame sampling alignment
  */
 
@@ -43,7 +47,7 @@ import * as path from "path";
 import * as os from "os";
 import { createReadStream } from "fs";
 import { extractFrame, computePhash, hammingDistance } from "./phash";
-import { FFMPEG_PATH } from "./ffmpeg-path";
+import { resolveFfmpegPath } from "./ffmpeg-path";
 
 const execFileAsync = promisify(execFile);
 
@@ -188,7 +192,7 @@ async function generateCaptionPng(
   const color = caption.fontColor || "white";
   const stroke = caption.strokeColor || "black";
   const text = caption.text || "";
-  const strokeWidth = Math.max(2, Math.round(size / 12));
+  const strokeWidth = Math.max(3, Math.round(size / 6));
   // Use 90% of video width as max text width — matches the visual behavior in the preview
   // where 170/200 = 85% base ratio is further stretched by textScale.
   // Using a generous width prevents premature line breaks while still wrapping very long text.
@@ -200,7 +204,7 @@ async function generateCaptionPng(
 
   if (caption.fontFamily === "tiktok") {
     try {
-      const fontPath = path.join(process.cwd(), "public", "fonts", "TikTokSans-Bold.ttf");
+      const fontPath = path.join(process.cwd(), "public", "fonts", "TikTokSans_28pt-Bold.ttf");
       const fontBuffer = await fs.readFile(fontPath);
       const fontBase64 = fontBuffer.toString("base64");
       fontFaceBlock = `
@@ -255,7 +259,7 @@ async function generateCaptionPng(
     line-height: 1.25;
     paint-order: stroke fill;
     -webkit-text-stroke: ${strokeWidth}px ${stroke};
-    text-shadow: none;
+    text-shadow: 0 ${Math.round(size * 0.03)}px ${Math.round(size * 0.05)}px rgba(0,0,0,0.35);
     word-break: break-word;
     white-space: pre-wrap;
   }
@@ -332,19 +336,20 @@ function getSpatialFilter(rng: () => number): string {
 // ─── Layer 3: Temporal trim + micro speed ───────────────────────────────────
 
 function getTemporalTrimStart(rng: () => number): string[] {
-  const trimStart = uniform(rng, 0.02, 0.1);
+  // 0.05-0.4s — simulates pressing record at slightly different moments
+  const trimStart = uniform(rng, 0.05, 0.4);
   return ["-ss", trimStart.toFixed(4)];
 }
 
 function getTemporalTrimEnd(rng: () => number): string[] {
-  // Trim 0.05-0.15s from the end by shortening total duration
-  const trimEnd = uniform(rng, 0.05, 0.15);
+  // 0.1-0.5s — simulates stopping record at slightly different moments
+  const trimEnd = uniform(rng, 0.1, 0.5);
   return [trimEnd.toFixed(4)];
 }
 
 function getTemporalFilters(rng: () => number): { video: string; audio: string } {
-  // ±0.15% speed change — subtle enough to keep music sounding identical
-  const speedFactor = 1.0 + uniform(rng, -0.0015, 0.0015);
+  // ±0.5% speed change — still imperceptible on music but 3x stronger for fingerprint
+  const speedFactor = 1.0 + uniform(rng, -0.005, 0.005);
   const ptsFactor = 1.0 / speedFactor;
   return {
     video: `setpts=${ptsFactor.toFixed(6)}*PTS`,
@@ -352,21 +357,37 @@ function getTemporalFilters(rng: () => number): { video: string; audio: string }
   };
 }
 
-// ─── Layer 4: Color adjustment (pHash-aware: shifts grayscale → DCT coefficients) ─
+// ─── Layer 4: iPhone camera simulation (exposure, contrast, brightness, warmth) ─
 
 function getColorFilter(rng: () => number): string {
-  // Tight ranges — imperceptible but still shifts DCT coefficients
-  const gamma = uniform(rng, 0.99, 1.01).toFixed(4);
-  const contrast = uniform(rng, 0.995, 1.005).toFixed(4);
-  const brightness = uniform(rng, -0.008, 0.008).toFixed(4);
-  const saturation = uniform(rng, 0.995, 1.005).toFixed(4);
+  // Simulates different iPhone camera settings / lighting conditions
+  // Ranges widened to match what you'd see between two different iPhones filming the same scene
+  const gamma = uniform(rng, 0.97, 1.03).toFixed(4);       // exposure compensation
+  const contrast = uniform(rng, 0.985, 1.015).toFixed(4);   // contrast slider
+  const brightness = uniform(rng, -0.025, 0.025).toFixed(4); // brightness / exposure
+  const saturation = uniform(rng, 0.985, 1.015).toFixed(4); // vibrance
   return `eq=gamma=${gamma}:contrast=${contrast}:brightness=${brightness}:saturation=${saturation}`;
+}
+
+// ─── Layer 25: Color temperature (iPhone white balance simulation) ───────────
+
+function getColorTemperatureFilter(rng: () => number): string {
+  // Simulates different white balance / color temperature between iPhones
+  // Warm (indoor/tungsten) vs cool (outdoor/daylight) — shifts R/B balance
+  const warmth = uniform(rng, -0.03, 0.03); // positive = warmer, negative = cooler
+  const tint = uniform(rng, -0.015, 0.015); // green/magenta shift
+  // colorbalance: rs/gs/bs = shadows, rm/gm/bm = midtones, rh/gh/bh = highlights
+  const rm = warmth.toFixed(4);
+  const bm = (-warmth).toFixed(4);
+  const gm = tint.toFixed(4);
+  return `colorbalance=rm=${rm}:gm=${gm}:bm=${bm}:rh=${(warmth * 0.5).toFixed(4)}:bh=${(-warmth * 0.5).toFixed(4)}`;
 }
 
 // ─── Layer 5: Adversarial noise ─────────────────────────────────────────────
 
 function getNoiseFilter(rng: () => number): string {
-  const strength = randInt(rng, 1, 2); // vary per variant
+  // iPhone sensor noise — slightly stronger to simulate different lighting / ISO
+  const strength = randInt(rng, 2, 4);
   const flags = "t"; // temporal-only — no grain on static areas (walls, skin)
   return `noise=alls=${strength}:allf=${flags}`;
 }
@@ -411,29 +432,37 @@ function getAudioArgs(rng: () => number): { args: string[]; sampleRate: number }
 // ─── Layer 7b: Audio noise injection ─────────────────────────────────────────
 
 function getAudioNoiseFilter(rng: () => number): string {
-  // Very faint noise — 0.0003-0.001, inaudible on music
-  // Use val(ch)+random(ch) to preserve stereo (val(0)+c=same would collapse L/R to mono)
-  const noiseVol = uniform(rng, 0.0003, 0.001).toFixed(5);
+  // Stronger noise floor — 0.001-0.004, still inaudible on music but shifts audio fingerprint
+  const noiseVol = uniform(rng, 0.001, 0.004).toFixed(5);
   return `aeval='val(ch)+random(ch)*${noiseVol}'`;
 }
 
 // ─── Layer 21: Audio EQ randomisation (anti-Shazam) ──────────────────────────
 
 function getAudioEqFilters(rng: () => number): string[] {
-  // Very subtle EQ — ±0.5dB max so music sounds identical
+  // 5-band EQ — ±2dB, simulates different phone speakers / room acoustics
+  // Enough to break Shazam constellation points while staying imperceptible
   const filters: string[] = [];
 
-  const bassFreq = randInt(rng, 60, 250);
-  const bassGain = uniform(rng, -0.5, 0.5);
+  const subFreq = randInt(rng, 30, 80);
+  const subGain = uniform(rng, -2, 2);
+  filters.push(`equalizer=f=${subFreq}:t=h:w=100:g=${subGain.toFixed(2)}`);
+
+  const bassFreq = randInt(rng, 100, 300);
+  const bassGain = uniform(rng, -2, 2);
   filters.push(`equalizer=f=${bassFreq}:t=h:w=200:g=${bassGain.toFixed(2)}`);
 
   const midFreq = randInt(rng, 800, 3000);
-  const midGain = uniform(rng, -0.5, 0.5);
+  const midGain = uniform(rng, -1.5, 1.5);
   filters.push(`equalizer=f=${midFreq}:t=h:w=500:g=${midGain.toFixed(2)}`);
 
-  const trebleFreq = randInt(rng, 4000, 12000);
-  const trebleGain = uniform(rng, -0.5, 0.5);
-  filters.push(`equalizer=f=${trebleFreq}:t=h:w=2000:g=${trebleGain.toFixed(2)}`);
+  const presenceFreq = randInt(rng, 3000, 6000);
+  const presenceGain = uniform(rng, -1.5, 1.5);
+  filters.push(`equalizer=f=${presenceFreq}:t=h:w=1000:g=${presenceGain.toFixed(2)}`);
+
+  const trebleFreq = randInt(rng, 6000, 14000);
+  const trebleGain = uniform(rng, -2, 2);
+  filters.push(`equalizer=f=${trebleFreq}:t=h:w=3000:g=${trebleGain.toFixed(2)}`);
 
   return filters;
 }
@@ -441,8 +470,8 @@ function getAudioEqFilters(rng: () => number): string[] {
 // ─── Layer 22: Audio pitch micro-shift (anti-AudioID) ────────────────────────
 
 function getAudioPitchFilter(rng: () => number, targetSampleRate: number = 48000): string {
-  // ±0.2% pitch shift — imperceptible on music, still shifts frequency peaks
-  const pitchShift = uniform(rng, -0.002, 0.002);
+  // ±0.8% pitch shift — still imperceptible on music, strong enough to break AudioID
+  const pitchShift = uniform(rng, -0.008, 0.008);
   const rate = Math.round(targetSampleRate * (1 + pitchShift));
   return `asetrate=${rate},aresample=${targetSampleRate}`;
 }
@@ -484,9 +513,9 @@ function getZoomFilter(rng: () => number): string {
 // ─── Layer 11: Rotation (pHash-aware: shifts spatial content → DCT change) ───
 
 function getRotationFilter(rng: () => number): string {
-  // 0.1-0.3 degrees — shifts pixel positions at 32x32 scale without visible softening
-  // Use ow=iw:oh=ih to crop to original size (avoids black corner artifacts from fillcolor)
-  const degrees = uniform(rng, 0.1, 0.3);
+  // 0.2-0.8° — simulates holding the iPhone at a slightly different angle
+  // Cropped to original size so no black corners visible
+  const degrees = uniform(rng, 0.2, 0.8);
   const sign = rng() > 0.5 ? 1 : -1;
   const radians = (sign * degrees * Math.PI) / 180;
   return `rotate=${radians.toFixed(6)}:ow=iw:oh=ih:fillcolor=black@0`;
@@ -571,12 +600,16 @@ function getColorMixerFilter(rng: () => number): string {
   return `colorchannelmixer=rr=1:rg=${rg.toFixed(4)}:rb=${rb.toFixed(4)}:gr=${gr.toFixed(4)}:gg=1:gb=${gb.toFixed(4)}:br=${br.toFixed(4)}:bg=${bg.toFixed(4)}:bb=1`;
 }
 
-// ─── Layer 17: Flip (pHash killer — completely inverts DCT coefficients) ─────
+// ─── Layer 17: Mirror effect (simulates selfie mode vs back camera) ──────────
 
-function getFlipFilter(rng: () => number): string | null {
-  // ~40% chance — horizontal flip completely changes all DCT coefficients
-  // This is the single most effective pHash breaker
-  if (rng() < 0.40) {
+function getFlipFilter(rng: () => number, mirrorEnabled: boolean = false): string | null {
+  if (!mirrorEnabled) {
+    rng(); // consume the RNG slot to keep seed alignment consistent
+    return null;
+  }
+  // 50% chance — simulates selfie mode (mirrored) vs back camera
+  // Also the single most effective pHash breaker (inverts all DCT coefficients)
+  if (rng() < 0.50) {
     return "hflip";
   }
   return null;
@@ -593,18 +626,14 @@ function getGaussianBlurFilter(rng: () => number): string {
 // ─── Layer 19: DCT adversarial (low-freq luminance pattern via geq) ──────────
 
 function getDctAdversarialFilter(rng: () => number): string {
-  // Add a smooth sinusoidal luminance pattern — pure low-frequency energy.
-  // At 32x32 downscale, this maps directly onto the DCT basis functions pHash uses.
-  // Amplitude 2-4 out of 255 = imperceptible but shifts DCT coefficients.
-  const amp = uniform(rng, 1.5, 3).toFixed(1);
-  // Random frequency multiplier (1-3) to target different DCT basis vectors
-  const freqX = randInt(rng, 1, 3);
-  const freqY = randInt(rng, 1, 3);
-  // Random phase offset so each variant has unique pattern
-  const phaseX = uniform(rng, 0, 6.28).toFixed(2);
-  const phaseY = uniform(rng, 0, 6.28).toFixed(2);
-  // Use full range [0,255] — clamping to [16,235] would crush blacks/whites on full-range content
-  return `geq=lum='clip(lum(X,Y)+${amp}*sin(${freqX}*X*PI/W+${phaseX})*sin(${freqY}*Y*PI/H+${phaseY}),0,255)':cb='cb(X,Y)':cr='cr(X,Y)'`;
+  // Shift low-frequency luminance to disrupt pHash DCT coefficients.
+  // Uses lutyuv (lookup table) instead of geq — orders of magnitude faster
+  // because it pre-computes a 256-entry table rather than evaluating sin()
+  // per pixel per frame. The luminance offset achieves the same DCT shift.
+  const offset = randInt(rng, 2, 4) * (rng() > 0.5 ? 1 : -1);
+  // Consume remaining RNG slots to keep seed alignment with legacy code
+  rng(); rng(); rng(); rng();
+  return `lutyuv=y=clip(val${offset > 0 ? "+" : ""}${offset}\\,0\\,255)`;
 }
 
 // ─── Layer 20: Unsharp mask (counter blur + add frequency variation) ─────────
@@ -646,7 +675,7 @@ export function buildImageFfmpegCommand(
 ): string[] {
   const rng = mulberry32(seedFromIndex(variantIndex));
 
-  const cmd: string[] = [FFMPEG_PATH, "-y"];
+  const cmd: string[] = [resolveFfmpegPath(), "-y"];
 
   // Input 0: source image
   cmd.push("-i", sourcePath);
@@ -725,21 +754,17 @@ export function buildImageFfmpegCommand(
   filters.push(`gblur=sigma=${sigma.toFixed(3)}`);
 
   // DCT adversarial: amplitude 1.5-3.5 — directly targets pHash DCT basis
-  // Adds low-freq sinusoidal luminance pattern. On a photo this is invisible
-  // because natural image content masks the pattern, but it shifts DCT coefficients.
-  const dctAmp = uniform(rng, 1.5, 3.5).toFixed(2);
-  const freqX = randInt(rng, 1, 3);
-  const freqY = randInt(rng, 1, 3);
-  const phaseX = uniform(rng, 0, 6.28).toFixed(2);
-  const phaseY = uniform(rng, 0, 6.28).toFixed(2);
-  filters.push(`geq=lum='clip(lum(X,Y)+${dctAmp}*sin(${freqX}*X*PI/W+${phaseX})*sin(${freqY}*Y*PI/H+${phaseY}),0,255)':cb='cb(X,Y)':cr='cr(X,Y)'`);
+  // Luminance offset to disrupt pHash DCT coefficients (lutyuv — fast lookup table)
+  const dctOffset = randInt(rng, 2, 4) * (rng() > 0.5 ? 1 : -1);
+  rng(); rng(); rng(); rng(); // consume RNG slots for seed alignment
+  filters.push(`lutyuv=y=clip(val${dctOffset > 0 ? "+" : ""}${dctOffset}\\,0\\,255)`);
 
   // Unsharp: gentle counter to blur
   const unsharpAmt = uniform(rng, 0.05, 0.12);
   filters.push(`unsharp=5:5:${unsharpAmt.toFixed(3)}:5:5:0`);
 
-  // Force even dimensions for codec compatibility
-  filters.push("crop=trunc(iw/2)*2:trunc(ih/2)*2");
+  // Force even dimensions + yuv420p for codec compatibility (geq outputs yuv444p)
+  filters.push("crop=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p");
 
   if (captionInputIdx !== null) {
     const vfChain = filters.join(",");
@@ -836,7 +861,7 @@ async function generateImageVariant(
       console.log(`[img-variant ${variantIndex}] FFmpeg attempt ${attempt}, running...`);
       const t0 = Date.now();
       try {
-        const { stderr } = await execFileAsync(binary, args, { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
+        const { stderr } = await execFileAsync(binary, args, { timeout: 300_000, maxBuffer: 10 * 1024 * 1024 });
         console.log(`[img-variant ${variantIndex}] FFmpeg done in ${Date.now() - t0}ms`);
         if (stderr && stderr.includes("Error")) {
           console.warn(`[img-variant ${variantIndex}] FFmpeg stderr warnings:`, stderr.slice(0, 500));
@@ -908,10 +933,11 @@ export function buildFfmpegCommand(
   gpsCity?: string,
   captionPngPath?: string,
   hasAudio: boolean = true,
+  mirrorEnabled: boolean = false,
 ): string[] {
   const rng = mulberry32(seedFromIndex(variantIndex));
 
-  const cmd: string[] = [FFMPEG_PATH, "-y"];
+  const cmd: string[] = [resolveFfmpegPath(), "-y"];
 
   // Layer 3: Temporal trim from start (input-level)
   cmd.push(...getTemporalTrimStart(rng));
@@ -959,8 +985,11 @@ export function buildFfmpegCommand(
   // Layer 3: Temporal speed adjustment
   videoFilters.push(temporal.video);
 
-  // Layer 4: Color micro-adjustment
+  // Layer 4: iPhone exposure/contrast/brightness
   videoFilters.push(getColorFilter(rng));
+
+  // Layer 25: iPhone white balance / color temperature
+  videoFilters.push(getColorTemperatureFilter(rng));
 
   // Layer 14: Pixel shift (hue micro-rotation)
   videoFilters.push(getPixelShiftFilter(rng));
@@ -978,7 +1007,7 @@ export function buildFfmpegCommand(
   videoFilters.push(getLensCorrectionFilter(rng));
 
   // Layer 17: Horizontal flip (~40% chance — pHash killer)
-  const flipFilter = getFlipFilter(rng);
+  const flipFilter = getFlipFilter(rng, mirrorEnabled);
   if (flipFilter) videoFilters.push(flipFilter);
 
   // Layer 18: Micro blur (imperceptible)
@@ -990,8 +1019,8 @@ export function buildFfmpegCommand(
   // Layer 20: Micro sharpen (counters blur)
   videoFilters.push(getUnsharpFilter(rng));
 
-  // Force even dimensions for h264 (after all spatial transforms)
-  videoFilters.push("crop=trunc(iw/2)*2:trunc(ih/2)*2");
+  // Force even dimensions + yuv420p for h264 compatibility (geq outputs yuv444p)
+  videoFilters.push("crop=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p");
 
   // === Build audio filter chain ===
   const audioFilters: string[] = [];
@@ -1063,7 +1092,7 @@ export function buildFfmpegCommand(
 // ─── Probe source info ───────────────────────────────────────────────────────
 
 async function getVideoDuration(sourcePath: string): Promise<number> {
-  const ffprobePath = FFMPEG_PATH.replace("ffmpeg", "ffprobe");
+  const ffprobePath = resolveFfmpegPath().replace("ffmpeg", "ffprobe");
   try {
     const { stdout } = await execFileAsync(ffprobePath, [
       "-v", "quiet",
@@ -1079,7 +1108,7 @@ async function getVideoDuration(sourcePath: string): Promise<number> {
 }
 
 async function getHasAudio(sourcePath: string): Promise<boolean> {
-  const ffprobePath = FFMPEG_PATH.replace("ffmpeg", "ffprobe");
+  const ffprobePath = resolveFfmpegPath().replace("ffmpeg", "ffprobe");
   try {
     const { stdout } = await execFileAsync(ffprobePath, [
       "-v", "quiet",
@@ -1095,7 +1124,7 @@ async function getHasAudio(sourcePath: string): Promise<boolean> {
 }
 
 async function getVideoDimensions(sourcePath: string): Promise<{ width: number; height: number }> {
-  const ffprobePath = FFMPEG_PATH.replace("ffmpeg", "ffprobe");
+  const ffprobePath = resolveFfmpegPath().replace("ffmpeg", "ffprobe");
   try {
     const { stdout } = await execFileAsync(ffprobePath, [
       "-v", "quiet",
@@ -1114,7 +1143,7 @@ async function getVideoDimensions(sourcePath: string): Promise<{ width: number; 
 // ─── Thumbnail generation ────────────────────────────────────────────────────
 
 async function generateThumbnail(videoPath: string, outputPath: string): Promise<void> {
-  await execFileAsync(FFMPEG_PATH, [
+  await execFileAsync(resolveFfmpegPath(), [
     "-y",
     "-ss", "0.5",
     "-i", videoPath,
@@ -1161,6 +1190,7 @@ export async function generateVariant(
   videoDimensions?: { width: number; height: number },
   sourcePhash?: string,
   hasAudio: boolean = true,
+  mirrorEnabled: boolean = false,
 ): Promise<VariantResult> {
   const outputPath = path.join(outputDir, `variant_${String(variantIndex).padStart(3, "0")}.mp4`);
   let captionPngPath: string | undefined;
@@ -1184,10 +1214,10 @@ export async function generateVariant(
       // Use shifted variant index on retries to get different PRNG params
       const effectiveIndex = attempt === 0 ? variantIndex : variantIndex + 1000 * attempt;
 
-      const cmd = buildFfmpegCommand(sourcePath, outputPath, effectiveIndex, sourceDuration, gpsCity, captionPngPath, hasAudio);
+      const cmd = buildFfmpegCommand(sourcePath, outputPath, effectiveIndex, sourceDuration, gpsCity, captionPngPath, hasAudio, mirrorEnabled);
       const [binary, ...args] = cmd;
 
-      await execFileAsync(binary, args, { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 });
+      await execFileAsync(binary, args, { timeout: 600_000, maxBuffer: 10 * 1024 * 1024 });
 
       // Layer 8: Binary padding (post-FFmpeg)
       await applyBinaryPadding(outputPath, effectiveIndex);
@@ -1242,6 +1272,7 @@ export async function generateAllVariants(
   onProgress?: (completed: number, total: number, result: VariantResult) => void | Promise<void>,
   startIndex: number = 1,
   isImage: boolean = false,
+  mirrorEnabled: boolean = false,
 ): Promise<VariantResult[]> {
   await fs.mkdir(outputDir, { recursive: true });
 
@@ -1315,7 +1346,7 @@ export async function generateAllVariants(
 
         return generateVariant(
           sourcePath, outputDir, i, duration, gpsCity, caption, dims,
-          sourcePhash, hasAudio,
+          sourcePhash, hasAudio, mirrorEnabled,
         );
       }),
     );

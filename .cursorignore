@@ -1,0 +1,13 @@
+# Build output
+.next/
+frontend/.next/
+out/
+dist/
+build/
+
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Supabase local
+supabase/.temp/

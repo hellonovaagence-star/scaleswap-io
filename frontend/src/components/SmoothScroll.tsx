@@ -14,18 +14,13 @@ export default function SmoothScroll({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     const instance = new Lenis({
-      lerp: 0.06,
-      duration: 1.4,
+      lerp: 0.1,
+      duration: 1.2,
       wheelMultiplier: 0.8,
       touchMultiplier: 1.5,
+      autoRaf: true,
     });
     setLenis(instance);
-
-    function raf(time: number) {
-      instance.raf(time);
-      requestAnimationFrame(raf);
-    }
-    requestAnimationFrame(raf);
 
     return () => instance.destroy();
   }, []);

@@ -85,6 +85,10 @@ export default function LandingPage() {
             ))}
           </ul>
           <div className="flex items-center gap-2.5">
+            <a href="https://discord.gg/t3ZjPbrFBY" target="_blank" rel="noopener noreferrer" className="hidden md:inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-[9px] transition-all duration-150" style={{ color: "var(--color-ink-2)" }}>
+              <Image src="/discord-logo.png" alt="Discord" width={16} height={16} style={{ opacity: 0.7 }} />
+              Discord
+            </a>
             <Link href="/projects" className="text-sm font-medium px-3.5 py-2 rounded-[9px] transition-all duration-150" style={{ color: "var(--color-ink-2)" }}>
               Sign in
             </Link>
@@ -173,12 +177,20 @@ export default function LandingPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.7, delay: 0.6, ease: [0.16, 1, 0.3, 1] }}
-            className="flex items-center justify-center gap-3">
-            <span className="text-[13px] font-medium" style={{ color: "var(--color-muted)" }}>Works on</span>
-            <div className="flex items-center gap-4">
-              <Image src="/tiktok-logo.svg" alt="TikTok" width={32} height={32} />
-              <Image src="/instagram-logo.png" alt="Instagram" width={32} height={32} />
-              <Image src="/threads-logo.png" alt="Threads" width={32} height={32} />
+            className="flex flex-col items-center gap-4">
+            {/* Rating bar */}
+            <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-0.5">
+                {[1,2,3,4,5].map((s) => (
+                  <svg key={s} width="14" height="14" viewBox="0 0 24 24" fill={s <= 4 ? "#F5A623" : "none"} stroke="#F5A623" strokeWidth="2">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    {s === 5 && <defs><linearGradient id="half"><stop offset="80%" stopColor="#F5A623" /><stop offset="80%" stopColor="transparent" /></linearGradient></defs>}
+                    {s === 5 && <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="url(#half)" />}
+                  </svg>
+                ))}
+              </div>
+              <span className="text-[13.5px] font-semibold tracking-tight" style={{ color: "var(--color-ink)" }}>4.8 / 5</span>
+              <span className="text-[12.5px]" style={{ color: "var(--color-muted)" }}>from 500+ reviews</span>
             </div>
           </motion.div>
 
@@ -402,6 +414,226 @@ export default function LandingPage() {
         </section>
       </RevealSection>
 
+
+      {/* BEFORE / AFTER */}
+      <RevealSection direction={50}>
+        <section className="py-24">
+          <div className="max-w-[1180px] mx-auto px-7">
+            <div className="text-center mb-16">
+              <span className="inline-block text-xs font-semibold uppercase tracking-wider mb-4 px-3 py-1.5 rounded-full" style={{
+                background: "var(--color-accent-soft)",
+                color: "var(--color-accent-hover)",
+              }}>Why Scaleswap</span>
+              <h2 className="text-3xl md:text-5xl tracking-tight mb-4" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
+                Stop wasting time.{" "}
+                <em className="not-italic" style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontStyle: "italic", color: "var(--color-accent)" }}>Start scaling</em>.
+              </h2>
+              <p className="text-base max-w-md mx-auto" style={{ color: "var(--color-muted)" }}>
+                See the difference Scaleswap makes for content creators.
+              </p>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-6 max-w-[960px] mx-auto">
+              {/* BEFORE */}
+              <div className="relative rounded-[20px] overflow-hidden" style={{
+                background: "linear-gradient(145deg, #FEFCFB 0%, #FFF5F2 100%)",
+                border: "1px solid rgba(238,90,36,0.12)",
+                boxShadow: "0 1px 3px rgba(238,90,36,0.04)",
+              }}>
+                {/* Header */}
+                <div className="px-7 pt-7 pb-5">
+                  <div className="flex items-center gap-3 mb-1.5">
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(238,90,36,0.1)" }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#E05A33" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    </div>
+                    <span className="text-[18px] font-semibold tracking-tight" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", letterSpacing: "-0.03em" }}>Before</span>
+                  </div>
+                  <p className="text-[12.5px] ml-11" style={{ color: "var(--color-muted)" }}>The manual grind</p>
+                </div>
+
+                {/* Items */}
+                <div className="px-5 pb-6 space-y-2">
+                  {[
+                    { metric: "4-5h", label: "per day", desc: "Editing & re-exporting variations manually" },
+                    { metric: "~$800", label: "/month", desc: "Paying a freelancer just to duplicate content" },
+                    { metric: "0h", label: "for strategy", desc: "No time left for high-impact growth tasks" },
+                    { metric: "1-3", label: "accounts max", desc: "Capped by time — impossible to scale further" },
+                  ].map((item, i) => (
+                    <div key={i} className="flex items-center gap-4 px-4 py-3.5 rounded-[14px] transition-all" style={{
+                      background: "rgba(255,255,255,0.7)",
+                      border: "1px solid rgba(238,90,36,0.06)",
+                    }}>
+                      <div className="flex-shrink-0 text-right" style={{ minWidth: 56 }}>
+                        <span className="text-[20px] font-bold tracking-tight leading-none" style={{ color: "#E05A33", fontFamily: "'Bricolage Grotesque', sans-serif", letterSpacing: "-0.03em" }}>{item.metric}</span>
+                        <div className="text-[10px] font-medium mt-0.5" style={{ color: "#E05A33", opacity: 0.6 }}>{item.label}</div>
+                      </div>
+                      <div className="w-px h-8 flex-shrink-0" style={{ background: "rgba(238,90,36,0.1)" }} />
+                      <p className="text-[12.5px] leading-snug" style={{ color: "var(--color-ink-2)" }}>{item.desc}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* AFTER */}
+              <div className="relative rounded-[20px] overflow-hidden" style={{
+                background: "linear-gradient(145deg, #FAFAFF 0%, #F3F1FF 100%)",
+                border: "1px solid rgba(139,127,255,0.2)",
+                boxShadow: "0 4px 24px -4px rgba(139,127,255,0.12), 0 1px 3px rgba(139,127,255,0.06)",
+              }}>
+                {/* Popular badge */}
+                <div className="absolute top-5 right-5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full text-white" style={{
+                    background: "var(--color-accent)",
+                    boxShadow: "0 2px 8px rgba(139,127,255,0.3)",
+                  }}>With Scaleswap</span>
+                </div>
+
+                {/* Header */}
+                <div className="px-7 pt-7 pb-5">
+                  <div className="flex items-center gap-3 mb-1.5">
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "var(--color-accent-soft)", boxShadow: "0 0 0 3px rgba(139,127,255,0.08)" }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    </div>
+                    <span className="text-[18px] font-semibold tracking-tight" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", letterSpacing: "-0.03em" }}>After</span>
+                  </div>
+                  <p className="text-[12.5px] ml-11" style={{ color: "var(--color-accent-hover)" }}>The Scaleswap way</p>
+                </div>
+
+                {/* Items */}
+                <div className="px-5 pb-6 space-y-2">
+                  {[
+                    { metric: "+5h", label: "saved / day", desc: "Generate all variants in under a minute" },
+                    { metric: "$0", label: "/month", desc: "No freelancer needed — Scaleswap does it all" },
+                    { metric: "100%", label: "your content", desc: "Full control from creation to distribution" },
+                    { metric: "20+", label: "accounts", desc: "Unlimited unique variants, post everywhere" },
+                  ].map((item, i) => (
+                    <div key={i} className="flex items-center gap-4 px-4 py-3.5 rounded-[14px] transition-all" style={{
+                      background: "rgba(255,255,255,0.8)",
+                      border: "1px solid rgba(139,127,255,0.08)",
+                    }}>
+                      <div className="flex-shrink-0 text-right" style={{ minWidth: 56 }}>
+                        <span className="text-[20px] font-bold tracking-tight leading-none" style={{ color: "var(--color-accent)", fontFamily: "'Bricolage Grotesque', sans-serif", letterSpacing: "-0.03em" }}>{item.metric}</span>
+                        <div className="text-[10px] font-medium mt-0.5" style={{ color: "var(--color-accent)", opacity: 0.6 }}>{item.label}</div>
+                      </div>
+                      <div className="w-px h-8 flex-shrink-0" style={{ background: "rgba(139,127,255,0.12)" }} />
+                      <p className="text-[12.5px] leading-snug" style={{ color: "var(--color-ink-2)" }}>{item.desc}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </RevealSection>
+
+      {/* REVIEWS */}
+      <RevealSection direction={50}>
+        <section className="py-24" style={{ background: "var(--color-surface)" }}>
+          <div className="max-w-[1180px] mx-auto px-7">
+            <div className="text-center mb-14">
+              <span className="inline-block text-xs font-semibold uppercase tracking-wider mb-4 px-3 py-1.5 rounded-full" style={{
+                background: "var(--color-accent-soft)",
+                color: "var(--color-accent-hover)",
+              }}>Reviews</span>
+              <h2 className="text-3xl md:text-5xl tracking-tight mb-4" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
+                Loved by{" "}
+                <em className="not-italic" style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontStyle: "italic", color: "var(--color-accent)" }}>creators</em>{" "}
+                💜
+              </h2>
+              <p className="text-base max-w-md mx-auto" style={{ color: "var(--color-muted)" }}>
+                See what our users have to say about scaling their content.
+              </p>
+            </div>
+
+            <div className="grid md:grid-cols-3 gap-5 max-w-[1000px] mx-auto">
+              {[
+                {
+                  name: "Marc D.",
+                  handle: "@marc.fitness",
+                  avatar: "https://randomuser.me/api/portraits/men/75.jpg",
+                  platform: "TikTok",
+                  stars: 5,
+                  text: "I went from posting on 1 account to running 22 accounts simultaneously. My organic reach exploded — all from the same content. Scaleswap is a no-brainer.",
+                },
+                {
+                  name: "Sofia L.",
+                  handle: "@sofiaa.style",
+                  avatar: "https://randomuser.me/api/portraits/women/44.jpg",
+                  platform: "Instagram",
+                  stars: 5,
+                  text: "I used to spend entire days re-editing reels for each account. Now I upload once and get 15 unique variants in seconds. I can finally focus on creating, not duplicating.",
+                },
+                {
+                  name: "Jordan K.",
+                  handle: "@jk.media",
+                  avatar: "https://randomuser.me/api/portraits/men/32.jpg",
+                  platform: "TikTok",
+                  stars: 5,
+                  text: "Our agency manages 30+ creator accounts. Scaleswap cut our editing costs by 80%. We cancelled our freelancer contract the same week we started using it.",
+                },
+                {
+                  name: "Emma T.",
+                  handle: "@emma.travels",
+                  avatar: "https://randomuser.me/api/portraits/women/68.jpg",
+                  platform: "Instagram",
+                  stars: 5,
+                  text: "The variants are literally indistinguishable from the original. I was skeptical at first, but zero of my posts have been flagged. It just works.",
+                },
+                {
+                  name: "Nathan R.",
+                  handle: "@nate.ecom",
+                  avatar: "https://randomuser.me/api/portraits/men/52.jpg",
+                  platform: "TikTok",
+                  stars: 4,
+                  text: "Went from 50K to 400K views per month across my accounts. The mirror effect and metadata stripping alone are worth it. Game changer for e-commerce creators.",
+                },
+                {
+                  name: "Lea M.",
+                  handle: "@lea.mindset",
+                  avatar: "https://randomuser.me/api/portraits/women/29.jpg",
+                  platform: "Threads",
+                  stars: 5,
+                  text: "I was paying $900/month for an editor to do what Scaleswap does in 30 seconds. Saved me time, money, and honestly — my sanity.",
+                },
+              ].map((review, i) => (
+                <RevealSection key={i} direction={30} delay={i * 0.06}>
+                  <div className="h-full p-5 rounded-2xl flex flex-col" style={{
+                    background: "var(--color-bg)",
+                    border: "1px solid var(--color-border-soft)",
+                  }}>
+                    {/* Stars */}
+                    <div className="flex items-center gap-0.5 mb-4">
+                      {Array.from({ length: review.stars }).map((_, s) => (
+                        <svg key={s} width="14" height="14" viewBox="0 0 24 24" fill="var(--color-accent)" stroke="none">
+                          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                      ))}
+                    </div>
+
+                    {/* Text */}
+                    <p className="text-[13.5px] leading-relaxed flex-1 mb-5" style={{ color: "var(--color-ink-2)" }}>
+                      &ldquo;{review.text}&rdquo;
+                    </p>
+
+                    {/* Author */}
+                    <div className="flex items-center gap-3 pt-4" style={{ borderTop: "1px solid var(--color-border-soft)" }}>
+                      <img src={review.avatar} alt={review.name} className="w-9 h-9 rounded-full object-cover" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13px] font-medium truncate" style={{ color: "var(--color-ink)" }}>{review.name}</div>
+                        <div className="text-[11.5px] truncate" style={{ color: "var(--color-muted)" }}>{review.handle}</div>
+                      </div>
+                      <span className="text-[10.5px] font-medium px-2 py-1 rounded-md flex-shrink-0" style={{
+                        background: "var(--color-surface-2)",
+                        color: "var(--color-muted)",
+                      }}>{review.platform}</span>
+                    </div>
+                  </div>
+                </RevealSection>
+              ))}
+            </div>
+          </div>
+        </section>
+      </RevealSection>
 
       {/* PRICING */}
       <RevealSection direction={50}>

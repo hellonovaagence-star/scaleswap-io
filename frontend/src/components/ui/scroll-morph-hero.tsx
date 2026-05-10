@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
-import { motion, useTransform, useSpring, useScroll, useMotionValue } from "framer-motion";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { motion, useTransform, useSpring, useScroll, useMotionValue, useMotionValueEvent } from "motion/react";
 
 // --- Types ---
 export type AnimationPhase = "scatter" | "line" | "circle";
@@ -18,7 +18,7 @@ interface FlipCardProps {
 const IMG_WIDTH = 60;
 const IMG_HEIGHT = 85;
 
-function FlipCard({ src, index, phase, target }: FlipCardProps) {
+function FlipCard({ src, index, target }: FlipCardProps) {
     return (
         <motion.div
             animate={{
@@ -94,7 +94,7 @@ const IMAGES = [
 const lerp = (start: number, end: number, t: number) => start * (1 - t) + end * t;
 
 // --- Sticky inner component (reads scroll progress) ---
-function StickyScene({ scrollProgress }: { scrollProgress: import("framer-motion").MotionValue<number> }) {
+function StickyScene({ scrollProgress }: { scrollProgress: import("motion/react").MotionValue<number> }) {
     const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
     const stickyRef = useRef<HTMLDivElement>(null);
     const introPhase: AnimationPhase = "circle";
@@ -136,16 +136,36 @@ function StickyScene({ scrollProgress }: { scrollProgress: import("framer-motion
         return () => el.removeEventListener("mousemove", handleMouseMove);
     }, [mouseX]);
 
-    const [morphValue, setMorphValue] = useState(0);
-    const [rotateValue, setRotateValue] = useState(0);
-    const [parallaxValue, setParallaxValue] = useState(0);
+    // Use refs instead of state to avoid re-rendering at 60fps
+    const morphRef = useRef(0);
+    const rotateRef = useRef(0);
+    const parallaxRef = useRef(0);
+    const [, forceRender] = useState(0);
+
+    // Throttled update: only re-render when values change meaningfully
+    const lastRenderTime = useRef(0);
+    const rafId = useRef<number>(0);
 
     useEffect(() => {
-        const u1 = smoothMorph.on("change", setMorphValue);
-        const u2 = smoothScrollRotate.on("change", setRotateValue);
-        const u3 = smoothMouseX.on("change", setParallaxValue);
-        return () => { u1(); u2(); u3(); };
+        const update = () => {
+            morphRef.current = smoothMorph.get();
+            rotateRef.current = smoothScrollRotate.get();
+            parallaxRef.current = smoothMouseX.get();
+
+            const now = performance.now();
+            if (now - lastRenderTime.current > 32) { // ~30fps max for card positions
+                lastRenderTime.current = now;
+                forceRender((v) => v + 1);
+            }
+            rafId.current = requestAnimationFrame(update);
+        };
+        rafId.current = requestAnimationFrame(update);
+        return () => cancelAnimationFrame(rafId.current);
     }, [smoothMorph, smoothScrollRotate, smoothMouseX]);
+
+    const morphValue = morphRef.current;
+    const rotateValue = rotateRef.current;
+    const parallaxValue = parallaxRef.current;
 
     const contentOpacity = useTransform(smoothMorph, [0.8, 1], [0, 1]);
     const contentY = useTransform(smoothMorph, [0.8, 1], [20, 0]);

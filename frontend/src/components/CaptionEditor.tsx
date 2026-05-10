@@ -131,7 +131,7 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
     Math.abs(customY - PRESET_Y[pos]) < SNAP_THRESHOLD;
 
   const previewFontSize = Math.max(8, fontSize * 0.35);
-  const previewStrokeWidth = Math.max(0.5, previewFontSize * 0.08);
+  const previewStrokeWidth = Math.max(0.5, previewFontSize * 0.16);
 
   // Which snap point is currently snapped
   const snappedPoint = SNAP_POINTS.find((s) => Math.abs(customY - s.y) < 1.5);
@@ -421,6 +421,7 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
                           color: fontColor,
                           WebkitTextStroke: strokeEnabled ? `${previewStrokeWidth}px ${strokeColor}` : undefined,
                           paintOrder: "stroke fill" as const,
+                          textShadow: strokeEnabled ? `0 ${Math.round(previewFontSize * 0.03)}px ${Math.round(previewFontSize * 0.05)}px rgba(0,0,0,0.35)` : undefined,
                           lineHeight: 1.25,
                           whiteSpace: "pre-wrap",
                           wordBreak: "break-word",

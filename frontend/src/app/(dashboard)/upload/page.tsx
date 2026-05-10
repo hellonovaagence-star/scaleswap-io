@@ -29,6 +29,7 @@ export default function UploadPage() {
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [gpsCity, setGpsCity] = useState("");
+  const [mirrorEnabled, setMirrorEnabled] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState("");
 
@@ -186,6 +187,7 @@ export default function UploadPage() {
         captionId: captionMode === "single" && selectedCaptionId ? selectedCaptionId : undefined,
         captionGroupId: captionMode === "group" && selectedCaptionGroupId ? selectedCaptionGroupId : undefined,
         projectType,
+        mirrorEnabled,
       }),
     }).catch(() => {});
 
@@ -328,6 +330,33 @@ export default function UploadPage() {
               </select>
               <div className="text-[11px] mt-1.5" style={{ color: "var(--color-muted)" }}>
                 Each variant gets unique GPS coordinates near this city
+              </div>
+            </div>
+
+            {/* Mirror toggle */}
+            <div className="border-t pt-4 mt-4" style={{ borderColor: "var(--color-border-soft)" }}>
+              <button
+                onClick={() => setMirrorEnabled(!mirrorEnabled)}
+                className="w-full flex items-center justify-between px-3 py-2.5 rounded-[10px] border transition-all"
+                style={{
+                  background: mirrorEnabled ? "var(--color-accent-soft)" : "var(--color-surface-2)",
+                  borderColor: mirrorEnabled ? "var(--color-accent)" : "var(--color-border)",
+                }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: mirrorEnabled ? "var(--color-accent-hover)" : "var(--color-muted)" }}>
+                    <path d="M12 3v18M8 7H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h4M16 7h4a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-4"/>
+                  </svg>
+                  <span className="text-[12.5px] font-medium" style={{ color: mirrorEnabled ? "var(--color-accent-hover)" : "var(--color-ink-2)" }}>
+                    Mirror effect
+                  </span>
+                </div>
+                <div className="w-8 h-[18px] rounded-full transition-all relative" style={{ background: mirrorEnabled ? "var(--color-accent)" : "var(--color-border)" }}>
+                  <div className="absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white transition-all" style={{ left: mirrorEnabled ? "calc(100% - 16px)" : "2px" }} />
+                </div>
+              </button>
+              <div className="text-[11px] mt-1.5" style={{ color: "var(--color-muted)" }}>
+                Random horizontal flip — most effective pHash breaker (videos only)
               </div>
             </div>
           </div>

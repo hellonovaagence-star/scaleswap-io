@@ -38,7 +38,7 @@ export default function LoginPage() {
   return (
     <div className="flex flex-col gap-6">
       {/* Logo */}
-      <div className="flex items-center gap-2.5 mb-2">
+      <Link href="/" className="flex items-center gap-2.5 mb-2 w-fit">
         <svg viewBox="0 0 100 100" fill="none" width="30" height="30">
           <rect x="8" y="8" width="60" height="60" rx="14" fill="#B8ADFF" />
           <rect x="32" y="32" width="60" height="60" rx="14" fill="#8B7FFF" />
@@ -53,7 +53,7 @@ export default function LoginPage() {
         >
           Scaleswap
         </span>
-      </div>
+      </Link>
 
       {/* Title */}
       <div>

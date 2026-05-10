@@ -34,6 +34,7 @@ export async function POST(req: NextRequest) {
     captionId, captionGroupId,
     startIndex = 1, batchSize,
     projectType = "video",
+    mirrorEnabled = false,
   } = body as {
     projectId: string;
     sourceUrl: string;
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest) {
     startIndex?: number;
     batchSize?: number;
     projectType?: "video" | "image";
+    mirrorEnabled?: boolean;
   };
 
   const isImage = projectType === "image";
@@ -260,7 +262,7 @@ export async function POST(req: NextRequest) {
           .eq("project_id", projectId)
           .eq("variant_index", i);
       }
-    }, startIndex, isImage);
+    }, startIndex, isImage, mirrorEnabled);
 
     // Update project status when this is the last batch (or the only batch)
     if (remaining === 0) {
