@@ -19,7 +19,7 @@ RUN npm run build
 FROM node:20-alpine
 
 # Install FFmpeg + Chromium + emoji font (Alpine packages are much smaller)
-RUN apk add --no-cache ffmpeg chromium noto-fonts-emoji
+RUN apk add --no-cache ffmpeg chromium font-noto-emoji
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV CHROME_PATH=/usr/bin/chromium-browser
