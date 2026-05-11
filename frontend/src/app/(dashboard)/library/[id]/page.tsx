@@ -54,13 +54,14 @@ function timeAgo(dateStr: string) {
 }
 
 export default function LibraryDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+  const { id: paramId } = use(params);
+  const [activeId, setActiveId] = useState(paramId);
   const [project, setProject] = useState<Project | null>(null);
   const [variants, setVariants] = useState<Variant[]>([]);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState("");
   const [selectedVariant, setSelectedVariant] = useState<Variant | null>(null);
-  const [playerVideo, setPlayerVideo] = useState<{ url: string; title: string; filename: string; isImage?: boolean } | null>(null);
+  const [playerVideo, setPlayerVideo] = useState<{ url: string; title: string; filename: string; isImage?: boolean; variantId?: string; thumbnailUrl?: string | null } | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
@@ -78,26 +79,36 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
   const router = useRouter();
   const supabase = createClient();
 
+  // Sync if URL param changes externally (e.g. browser back/forward)
+  useEffect(() => {
+    setActiveId(paramId);
+  }, [paramId]);
+
   const fetchData = useCallback(async () => {
     const [projRes, varRes] = await Promise.all([
-      supabase.from("projects").select("*").eq("id", id).single(),
-      supabase.from("variants").select("*").eq("project_id", id).order("variant_index"),
+      supabase.from("projects").select("*").eq("id", activeId).single(),
+      supabase.from("variants").select("*").eq("project_id", activeId).order("variant_index"),
     ]);
     if (projRes.data) setProject(projRes.data);
     setVariants(varRes.data ?? []);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [activeId]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  // Fetch batch siblings when project has a batch_id
+  // Fetch batch siblings when project has a batch_id (only once per batch)
+  const batchIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!project?.batch_id) {
       setBatchSiblings([]);
+      batchIdRef.current = null;
       return;
     }
+    // Don't re-fetch siblings if same batch
+    if (batchIdRef.current === project.batch_id) return;
+    batchIdRef.current = project.batch_id;
     const fetchSiblings = async () => {
       const { data } = await supabase
         .from("projects")
@@ -110,12 +121,29 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.batch_id]);
 
+  // Navigate to a batch sibling — instant switch, no remount
+  const navigateToSibling = useCallback((siblingId: string) => {
+    if (siblingId === activeId) return;
+    // Immediately show sibling data from cache
+    const sibling = batchSiblings.find((s) => s.id === siblingId);
+    if (sibling) setProject(sibling);
+    // Don't clear variants — let fetchData overwrite them for a smoother transition
+    setSelectedVariant(null);
+    setPlayerVideo(null);
+    setSelectMode(false);
+    setSelectedIds(new Set());
+    setShowAudit(false);
+    setActiveId(siblingId);
+    // Use Next.js router so internal state stays in sync (fixes double-click)
+    router.push(`/library/${siblingId}`, { scroll: false });
+  }, [batchSiblings, activeId, router]);
+
   // Scroll active item into view in batch strip
   useEffect(() => {
     if (batchSiblings.length <= 1 || !batchStripRef.current) return;
     const activeEl = batchStripRef.current.querySelector('[data-active="true"]');
     if (activeEl) activeEl.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-  }, [batchSiblings, id]);
+  }, [batchSiblings, activeId]);
 
   // Poll variants every 2s while project is processing (max 10 min)
   useEffect(() => {
@@ -130,7 +158,7 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
         await supabase
           .from("projects")
           .update({ status: "error" })
-          .eq("id", id);
+          .eq("id", activeId);
         fetchData();
         return;
       }
@@ -138,9 +166,33 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
     }, 2000);
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project?.status, fetchData]);
+  }, [project?.status, fetchData, activeId]);
 
   const isImageProject = project?.type === "image";
+
+  /** Extract Supabase storage path from a public URL and delete the file */
+  const deleteFromStorage = useCallback(async (publicUrl: string) => {
+    const marker = "/storage/v1/object/public/videos/";
+    const idx = publicUrl.indexOf(marker);
+    if (idx === -1) return;
+    const storagePath = publicUrl.substring(idx + marker.length);
+    await supabase.storage.from("videos").remove([storagePath]);
+  }, [supabase]);
+
+  /** Clean up variant files from storage after download, then clear URLs in DB */
+  const cleanupVariants = useCallback(async (variantIds: string[], urls: string[]) => {
+    // Delete files from storage
+    await Promise.all(urls.map((u) => deleteFromStorage(u)));
+    // Clear output_url & thumbnail_url so the UI reflects deletion
+    for (const vid of variantIds) {
+      await supabase
+        .from("variants")
+        .update({ output_url: null, thumbnail_url: null })
+        .eq("id", vid);
+    }
+    // Refresh UI
+    fetchData();
+  }, [deleteFromStorage, supabase, fetchData]);
 
   // Load media metadata for audit table
   const loadAuditData = useCallback(async () => {
@@ -201,7 +253,7 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
   }, [project, variants]);
 
   const handleDelete = async () => {
-    await supabase.from("projects").delete().eq("id", id);
+    await supabase.from("projects").delete().eq("id", activeId);
     window.location.href = "/library";
   };
 
@@ -311,6 +363,16 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+
+    // Auto-delete exported files from storage
+    const variantIds = toExport.map((v) => v.id);
+    const storageUrls = toExport.flatMap((v) => {
+      const urls = [v.output_url!];
+      if (v.thumbnail_url) urls.push(v.thumbnail_url);
+      return urls;
+    });
+    await cleanupVariants(variantIds, storageUrls);
+
     setExporting(false);
   };
 
@@ -353,12 +415,12 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
           }}
         >
           {batchSiblings.map((s) => {
-            const isActive = s.id === id;
+            const isActive = s.id === activeId;
             return (
               <button
                 key={s.id}
                 data-active={isActive}
-                onClick={() => router.push(`/library/${s.id}`)}
+                onClick={() => !isActive && navigateToSibling(s.id)}
                 className="shrink-0 flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] border transition-all"
                 style={{
                   scrollSnapAlign: "center",
@@ -806,6 +868,8 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
                         title: `Variation ${String(v.variant_index).padStart(2, "0")}`,
                         filename: `${project?.title?.replace(/\s+/g, "_") || "variant"}_V${String(v.variant_index).padStart(2, "0")}${ext}`,
                         isImage: isImageProject,
+                        variantId: v.id,
+                        thumbnailUrl: v.thumbnail_url,
                       });
                     }
                   }}
@@ -1027,6 +1091,13 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
                 a.click();
                 a.remove();
                 URL.revokeObjectURL(url);
+                // Auto-delete from storage after download
+                if (playerVideo.variantId) {
+                  const urls = [playerVideo.url];
+                  if (playerVideo.thumbnailUrl) urls.push(playerVideo.thumbnailUrl);
+                  cleanupVariants([playerVideo.variantId], urls);
+                  setPlayerVideo(null);
+                }
               }}
               className="mt-4 inline-flex items-center gap-2 text-[13px] font-medium px-5 py-2.5 rounded-[10px] text-white transition-all hover:-translate-y-px cursor-pointer"
               style={{

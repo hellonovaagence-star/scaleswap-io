@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect, useRef } from "react";
 import type { Caption } from "@/lib/api";
 
 interface CaptionCardProps {
@@ -9,42 +10,81 @@ interface CaptionCardProps {
   onDelete: (id: string) => void;
 }
 
-const positionLabels = { top: "Top", center: "Center", bottom: "Bottom" };
+const positionLabels: Record<string, string> = { top: "Top", center: "Center", bottom: "Bottom" };
+function getPositionLabel(pos: string): string {
+  if (positionLabels[pos]) return positionLabels[pos];
+  if (pos.includes(",")) {
+    const y = parseFloat(pos);
+    if (y < 25) return "Top";
+    if (y > 75) return "Bottom";
+    return "Center";
+  }
+  return "Custom";
+}
 
 export default function CaptionCard({ caption, groupNames, onEdit, onDelete }: CaptionCardProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [menuOpen]);
+
   return (
-    <div className="rounded-[14px] p-4 border transition-all duration-200 hover:-translate-y-0.5" style={{
-      background: "var(--color-surface)",
-      borderColor: "var(--color-border-soft)",
-    }}>
+    <div
+      className="rounded-[14px] p-4 border transition-all duration-200 hover:-translate-y-0.5 cursor-pointer"
+      style={{
+        background: "var(--color-surface)",
+        borderColor: "var(--color-border-soft)",
+      }}
+      onClick={() => onEdit(caption)}
+    >
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="min-w-0">
           <p className="text-[13px] leading-relaxed line-clamp-2" style={{ color: "var(--color-ink-2)" }}>
             {caption.text}
           </p>
         </div>
-        <div className="relative shrink-0">
+        <div className="relative shrink-0" ref={menuRef}>
           <button
             onClick={(e) => {
-              const menu = e.currentTarget.nextElementSibling;
-              menu?.classList.toggle("hidden");
+              e.stopPropagation();
+              setMenuOpen(!menuOpen);
             }}
             className="w-7 h-7 inline-flex items-center justify-center rounded-[6px] transition-colors hover:bg-[var(--color-surface-2)]"
             style={{ color: "var(--color-muted-2)" }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
           </button>
-          <div className="hidden absolute right-0 top-8 z-10 min-w-[120px] rounded-lg border p-1 shadow-lg" style={{
-            background: "var(--color-surface)",
-            borderColor: "var(--color-border)",
-          }}>
-            <button onClick={() => onEdit(caption)} className="w-full text-left text-[13px] px-2.5 py-1.5 rounded-md transition-colors hover:bg-[var(--color-surface-2)]" style={{ color: "var(--color-ink-2)" }}>
-              Edit
-            </button>
-            <button onClick={() => onDelete(caption.id)} className="w-full text-left text-[13px] px-2.5 py-1.5 rounded-md transition-colors hover:bg-[var(--color-surface-2)]" style={{ color: "var(--color-red)" }}>
-              Delete
-            </button>
-          </div>
+          {menuOpen && (
+            <div className="absolute right-0 top-8 z-10 min-w-[120px] rounded-lg border p-1 shadow-lg" style={{
+              background: "var(--color-surface)",
+              borderColor: "var(--color-border)",
+            }}>
+              <button
+                onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit(caption); }}
+                className="w-full text-left text-[13px] px-2.5 py-1.5 rounded-md transition-colors hover:bg-[var(--color-surface-2)]"
+                style={{ color: "var(--color-ink-2)" }}
+              >
+                Edit
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDelete(caption.id); }}
+                className="w-full text-left text-[13px] px-2.5 py-1.5 rounded-md transition-colors hover:bg-[var(--color-surface-2)]"
+                style={{ color: "var(--color-red)" }}
+              >
+                Delete
+              </button>
+            </div>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-2 mt-3">
@@ -52,7 +92,7 @@ export default function CaptionCard({ caption, groupNames, onEdit, onDelete }: C
           background: "var(--color-accent-soft)",
           color: "var(--color-accent-hover)",
         }}>
-          {positionLabels[caption.position]}
+          {getPositionLabel(caption.position)}
         </span>
         <span className="text-[10.5px] font-medium px-[7px] py-[3px] rounded-full" style={{
           background: "var(--color-surface-2)",

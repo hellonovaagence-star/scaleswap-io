@@ -72,13 +72,18 @@ export default function UploadPage() {
     fetchGroups();
   }, [fetchGroups]);
 
-  // Watch bulk queue completion
+  // Auto-start queue when entering processing phase
   useEffect(() => {
     if (bulkPhase === "processing" && !bulkQueue.isRunning && bulkQueue.queue.length > 0) {
+      const allPending = bulkQueue.queue.every((q) => q.status === "pending");
+      if (allPending) {
+        bulkQueue.startQueue();
+        return;
+      }
       const doneCount = bulkQueue.queue.filter((q) => q.status === "ready" || q.status === "error").length;
       if (doneCount === bulkQueue.queue.length) setBulkPhase("done");
     }
-  }, [bulkPhase, bulkQueue.isRunning, bulkQueue.queue]);
+  }, [bulkPhase, bulkQueue.isRunning, bulkQueue.queue, bulkQueue.startQueue]);
 
   // Handle file selection — supports both single and multi
   const handleFilesSelect = (newFiles: File[]) => {
@@ -269,10 +274,6 @@ export default function UploadPage() {
 
     setBulkPhase("processing");
     setIsGenerating(false);
-
-    setTimeout(() => {
-      bulkQueue.startQueue();
-    }, 100);
   };
 
   const variantPresets = [1, 3, 5, 10, 15, 25];

@@ -24,6 +24,12 @@ RUN apk add --no-cache ffmpeg chromium font-noto-emoji
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV CHROME_PATH=/usr/bin/chromium-browser
 
+# Supabase env vars needed at runtime for middleware & API routes
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+
 WORKDIR /app
 
 COPY --from=builder /app/package*.json ./

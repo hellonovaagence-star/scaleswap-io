@@ -114,7 +114,7 @@ export interface GenerateConfig {
 export interface Caption {
   id: string;
   text: string;
-  position: "top" | "center" | "bottom";
+  position: string;
   font_size: number;
   font_color: string;
   stroke_color: string;

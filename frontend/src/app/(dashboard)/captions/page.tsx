@@ -27,23 +27,22 @@ export default function CaptionsPage() {
   const { user } = useUser();
 
   const fetchData = useCallback(async () => {
+    const sb = createClient();
     const [captionsRes, groupsRes, membersRes] = await Promise.all([
-      supabase.from("captions").select("*").order("created_at", { ascending: false }),
-      supabase.from("caption_groups").select("*").order("created_at", { ascending: false }),
-      supabase.from("caption_group_members").select("*"),
+      sb.from("captions").select("*").order("created_at", { ascending: false }),
+      sb.from("caption_groups").select("*").order("created_at", { ascending: false }),
+      sb.from("caption_group_members").select("*"),
     ]);
     setCaptions(captionsRes.data ?? []);
     const rawGroups = groupsRes.data ?? [];
     const rawMembers = membersRes.data ?? [];
     setGroupMembers(rawMembers);
-    // Enrich groups with caption_ids for compatibility with existing components
     setGroups(
       rawGroups.map((g: { id: string; name: string; description?: string; created_at: string }) => ({
         ...g,
         caption_ids: rawMembers.filter((m) => m.group_id === g.id).map((m) => m.caption_id),
       }))
     );
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -86,7 +85,27 @@ export default function CaptionsPage() {
 
     if (editingCaption) {
       captionId = editingCaption.id;
-      await supabase.from("captions").update(data).eq("id", captionId);
+      const updatePayload = {
+        text: data.text,
+        position: data.position,
+        font_size: data.font_size,
+        font_color: data.font_color,
+        stroke_color: data.stroke_color,
+        font_family: data.font_family,
+      };
+      console.log("[caption update] id:", captionId, "payload:", updatePayload);
+      const { data: updated, error: updateError } = await supabase
+        .from("captions")
+        .update(updatePayload)
+        .eq("id", captionId)
+        .select()
+        .single();
+      if (updateError || !updated) {
+        console.error("[caption update] failed:", updateError);
+        return;
+      }
+      // Optimistic: update local state immediately so UI reflects changes
+      setCaptions((prev) => prev.map((c) => c.id === captionId ? { ...c, ...updatePayload } : c));
     } else {
       const { data: newCaption } = await supabase
         .from("captions")
@@ -107,7 +126,7 @@ export default function CaptionsPage() {
 
     setShowCaptionEditor(false);
     setEditingCaption(null);
-    fetchData();
+    await fetchData();
   };
 
   const handleDeleteCaption = async (id: string) => {

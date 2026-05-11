@@ -154,7 +154,7 @@ async function getCaptionBrowser(): Promise<Browser> {
 
 export interface CaptionOverlay {
   text: string;
-  position: "top" | "center" | "bottom";
+  position: string;
   fontSize: number;
   fontColor: string;
   strokeColor: string;
@@ -220,9 +220,14 @@ async function generateCaptionPng(
     }
   }
 
-  // Position: match CaptionEditor PRESET_Y values (top=8%, center=50%, bottom=88%)
+  // Position: "Y,X" exact coords, or legacy "top"/"center"/"bottom"
   let yPercent: number;
-  if (caption.position === "top") yPercent = 8;
+  let xPercent = 50;
+  if (caption.position.includes(",")) {
+    const [y, x] = caption.position.split(",").map(Number);
+    yPercent = isNaN(y) ? 50 : y;
+    xPercent = isNaN(x) ? 50 : x;
+  } else if (caption.position === "top") yPercent = 8;
   else if (caption.position === "bottom") yPercent = 88;
   else yPercent = 50;
 
@@ -248,7 +253,7 @@ async function generateCaptionPng(
   .caption {
     position: absolute;
     top: ${yPercent}%;
-    left: 50%;
+    left: ${xPercent}%;
     transform: translate(-50%, -50%);
     max-width: ${maxTextWidth}px;
     font-family: ${fontFamilyCss};
@@ -399,9 +404,9 @@ function getCodecArgs(rng: () => number, baseCrf: number = 18): string[] {
   const gop = pick(rng, [24, 30, 48, 60, 72, 90, 120]);
   const profile = pick(rng, ["main", "high", "high"]);
   const level = pick(rng, ["4.0", "4.1", "4.2", "5.0", "5.1"]);
-  const preset = pick(rng, ["veryfast", "veryfast", "fast"]);
-  const bf = pick(rng, [1, 2, 3]);
-  const refs = pick(rng, [1, 2, 3, 4]);
+  const preset = pick(rng, ["ultrafast", "veryfast", "veryfast"]);
+  const bf = 1;
+  const refs = 1;
   // Micro framerate variation — shifts which frames align with platform sampling points
   const fps = pick(rng, ["29.97", "30", "30", "30.03", "29.95"]);
 
@@ -471,9 +476,11 @@ function getAudioEqFilters(rng: () => number): string[] {
 
 function getAudioPitchFilter(rng: () => number, targetSampleRate: number = 48000): string {
   // ±0.8% pitch shift — still imperceptible on music, strong enough to break AudioID
+  // First normalize to targetSampleRate so asetrate works relative to a known base,
+  // regardless of the source's original sample rate.
   const pitchShift = uniform(rng, -0.008, 0.008);
   const rate = Math.round(targetSampleRate * (1 + pitchShift));
-  return `asetrate=${rate},aresample=${targetSampleRate}`;
+  return `aresample=${targetSampleRate},asetrate=${rate},aresample=${targetSampleRate}`;
 }
 
 // ─── Layer 8: Binary padding (post-FFmpeg) ──────────────────────────────────
@@ -831,16 +838,17 @@ async function generateImageVariant(
   caption?: CaptionOverlay,
   imageDimensions?: { width: number; height: number },
   sourcePhash?: string,
+  preGeneratedCaptionPath?: string,
 ): Promise<VariantResult> {
   const outputPath = path.join(outputDir, `variant_${String(variantIndex).padStart(3, "0")}.jpg`);
-  let captionPngPath: string | undefined;
+  let captionPngPath: string | undefined = preGeneratedCaptionPath;
   const thumbPath = path.join(outputDir, `thumb_${String(variantIndex).padStart(3, "0")}.jpg`);
 
   try {
     console.log(`[img-variant ${variantIndex}] Starting image variant generation`);
 
-    // Generate caption overlay PNG if caption is provided
-    if (caption && caption.text.trim()) {
+    // Generate caption overlay PNG if caption is provided and not pre-generated
+    if (!captionPngPath && caption && caption.text.trim()) {
       console.log(`[img-variant ${variantIndex}] Generating caption PNG...`);
       const dims = imageDimensions || await getImageDimensions(sourcePath);
       captionPngPath = path.join(outputDir, `caption_${variantIndex}.png`);
@@ -917,7 +925,8 @@ async function generateImageVariant(
     console.error(`[img-variant ${variantIndex}] FAILED:`, msg);
     return { variantIndex, outputPath: "", success: false, hash: null, phash: null, phashDistance: null, thumbnailPath: null, error: msg };
   } finally {
-    if (captionPngPath) {
+    // Only clean up caption PNGs we generated ourselves (not pre-generated shared ones)
+    if (captionPngPath && !preGeneratedCaptionPath) {
       await fs.unlink(captionPngPath).catch(() => {});
     }
   }
@@ -1178,7 +1187,7 @@ async function computeFileHash(filePath: string): Promise<string> {
 }
 
 const PHASH_MIN_DISTANCE = 10;
-const PHASH_MAX_RETRIES = 2;
+const PHASH_MAX_RETRIES = 1;
 
 export async function generateVariant(
   sourcePath: string,
@@ -1191,15 +1200,16 @@ export async function generateVariant(
   sourcePhash?: string,
   hasAudio: boolean = true,
   mirrorEnabled: boolean = false,
+  preGeneratedCaptionPath?: string,
 ): Promise<VariantResult> {
   const outputPath = path.join(outputDir, `variant_${String(variantIndex).padStart(3, "0")}.mp4`);
-  let captionPngPath: string | undefined;
+  let captionPngPath: string | undefined = preGeneratedCaptionPath;
   const thumbPath = path.join(outputDir, `thumb_${String(variantIndex).padStart(3, "0")}.jpg`);
   const variantFramePath = path.join(outputDir, `frame_${variantIndex}.png`);
 
   try {
-    // Generate caption overlay PNG if caption is provided
-    if (caption && caption.text.trim()) {
+    // Generate caption overlay PNG if caption is provided and not pre-generated
+    if (!captionPngPath && caption && caption.text.trim()) {
       const dims = videoDimensions || await getVideoDimensions(sourcePath);
       captionPngPath = path.join(outputDir, `caption_${variantIndex}.png`);
       await generateCaptionPng(caption, dims.width, dims.height, captionPngPath);
@@ -1257,7 +1267,8 @@ export async function generateVariant(
     const msg = err instanceof Error ? err.message : String(err);
     return { variantIndex, outputPath: "", success: false, hash: null, phash: null, phashDistance: null, thumbnailPath: null, error: msg };
   } finally {
-    if (captionPngPath) {
+    // Only clean up caption PNGs we generated ourselves (not pre-generated shared ones)
+    if (captionPngPath && !preGeneratedCaptionPath) {
       await fs.unlink(captionPngPath).catch(() => {});
     }
   }
@@ -1319,9 +1330,26 @@ export async function generateAllVariants(
     }
   }
 
+  // Pre-generate caption PNGs in batch (once per unique caption, shared across variants)
+  const captionPngPaths: Map<string, string> = new Map();
+  if (hasCaptions) {
+    const uniqueCaptions = captions.length === 1
+      ? [captions[0]]
+      : [...new Map(captions.map((c) => [c.text, c])).values()];
+
+    for (let ci = 0; ci < uniqueCaptions.length; ci++) {
+      const cap = uniqueCaptions[ci];
+      if (cap.text.trim()) {
+        const capPath = path.join(outputDir, `caption_pre_${ci}.png`);
+        await generateCaptionPng(cap, dims.width, dims.height, capPath);
+        captionPngPaths.set(cap.text, capPath);
+      }
+    }
+  }
+
   // Parallel execution — run multiple FFmpeg processes concurrently
-  // Use half of CPU cores (FFmpeg itself is multi-threaded) with min 2, max 6
-  const concurrency = Math.max(2, Math.min(6, Math.floor(os.cpus().length / 2)));
+  // Use half of CPU cores (FFmpeg itself is multi-threaded) with min 2, max 10
+  const concurrency = Math.max(2, Math.min(10, Math.floor(os.cpus().length / 2)));
   const results: VariantResult[] = [];
   let completed = 0;
 
@@ -1335,18 +1363,19 @@ export async function generateAllVariants(
     const batchResults = await Promise.all(
       batchIndices.map((i) => {
         const caption = hasCaptions
-          ? (captions.length === 1 ? captions[0] : captions[(i - 1) % captions.length])
+          ? (captions.length === 1 ? captions[0] : captions[Math.floor(Math.random() * captions.length)])
           : undefined;
+        const preCaptionPath = caption ? captionPngPaths.get(caption.text) : undefined;
 
         if (isImage) {
           return generateImageVariant(
-            sourcePath, outputDir, i, gpsCity, caption, dims, sourcePhash,
+            sourcePath, outputDir, i, gpsCity, caption, dims, sourcePhash, preCaptionPath,
           );
         }
 
         return generateVariant(
           sourcePath, outputDir, i, duration, gpsCity, caption, dims,
-          sourcePhash, hasAudio, mirrorEnabled,
+          sourcePhash, hasAudio, mirrorEnabled, preCaptionPath,
         );
       }),
     );
@@ -1362,6 +1391,10 @@ export async function generateAllVariants(
   if (!isImage) {
     const sourceFramePath = path.join(outputDir, "source_frame.png");
     await fs.unlink(sourceFramePath).catch(() => {});
+  }
+  // Clean up pre-generated caption PNGs
+  for (const capPath of captionPngPaths.values()) {
+    await fs.unlink(capPath).catch(() => {});
   }
 
   return results;

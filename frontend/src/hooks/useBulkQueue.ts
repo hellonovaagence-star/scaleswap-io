@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 export interface QueueItem {
@@ -16,6 +16,12 @@ export function useBulkQueue() {
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [isRunning, setIsRunning] = useState(false);
   const abortRef = useRef(false);
+  const queueRef = useRef<QueueItem[]>([]);
+
+  // Keep ref in sync with state so startQueue always reads the latest queue
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
 
   const addToQueue = useCallback((item: Omit<QueueItem, "status">) => {
     setQueue((prev) => [...prev, { ...item, status: "pending" }]);
@@ -27,59 +33,80 @@ export function useBulkQueue() {
     abortRef.current = false;
     const supabase = createClient();
 
-    for (let i = 0; i < queue.length; i++) {
-      if (abortRef.current) break;
-      setCurrentIndex(i);
-      const item = queue[i];
+    const items = queueRef.current;
 
-      // Mark processing
-      setQueue((prev) =>
-        prev.map((q, idx) => (idx === i ? { ...q, status: "processing" } : q))
-      );
-
-      // Fire generation
-      try {
-        await fetch("/api/generate", {
+    // Fire ALL generation requests in parallel (non-blocking)
+    const projectIds: string[] = [];
+    const fireResults = await Promise.allSettled(
+      items.map(async (item, idx) => {
+        setQueue((prev) =>
+          prev.map((q, i) => (i === idx ? { ...q, status: "processing" } : q))
+        );
+        const res = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(item.generatePayload),
         });
-      } catch {
-        setQueue((prev) =>
-          prev.map((q, idx) => (idx === i ? { ...q, status: "error" } : q))
-        );
-        continue;
-      }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return item.projectId;
+      })
+    );
 
-      // Poll until status != "processing" (max 12 min)
+    // Mark failed fires as error, collect successful project IDs
+    fireResults.forEach((result, idx) => {
+      if (result.status === "fulfilled") {
+        projectIds.push(result.value);
+      } else {
+        setQueue((prev) =>
+          prev.map((q, i) => (i === idx ? { ...q, status: "error" } : q))
+        );
+      }
+    });
+
+    // Unified polling — check ALL projects at once every 2s
+    if (projectIds.length > 0) {
       const TIMEOUT = 12 * 60 * 1000;
       const POLL_INTERVAL = 2000;
       const startedAt = Date.now();
-      let finalStatus: "ready" | "error" = "error";
+      const remaining = new Set(projectIds);
 
-      while (Date.now() - startedAt < TIMEOUT) {
+      while (remaining.size > 0 && Date.now() - startedAt < TIMEOUT) {
         if (abortRef.current) break;
         await new Promise((r) => setTimeout(r, POLL_INTERVAL));
 
         const { data } = await supabase
           .from("projects")
-          .select("status")
-          .eq("id", item.projectId)
-          .single();
+          .select("id, status")
+          .in("id", Array.from(remaining));
 
-        if (data && data.status !== "processing") {
-          finalStatus = data.status === "ready" ? "ready" : "error";
-          break;
+        if (data) {
+          for (const row of data) {
+            if (row.status !== "processing") {
+              remaining.delete(row.id);
+              const finalStatus = row.status === "ready" ? "ready" : "error";
+              setQueue((prev) =>
+                prev.map((q) =>
+                  q.projectId === row.id ? { ...q, status: finalStatus } : q
+                )
+              );
+            }
+          }
         }
       }
 
-      setQueue((prev) =>
-        prev.map((q, idx) => (idx === i ? { ...q, status: finalStatus } : q))
-      );
+      // Timeout remaining items as error
+      if (remaining.size > 0) {
+        setQueue((prev) =>
+          prev.map((q) =>
+            remaining.has(q.projectId) ? { ...q, status: "error" } : q
+          )
+        );
+      }
     }
 
+    setCurrentIndex(items.length - 1);
     setIsRunning(false);
-  }, [isRunning, queue]);
+  }, [isRunning]);
 
   const completedCount = queue.filter((q) => q.status === "ready").length;
   const errorCount = queue.filter((q) => q.status === "error").length;

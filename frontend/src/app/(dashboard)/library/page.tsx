@@ -241,6 +241,32 @@ export default function LibraryPage() {
     a.download = `bulk_export_${ids.length}_projects.zip`;
     a.click();
     URL.revokeObjectURL(url);
+
+    // Auto-delete exported files from storage
+    const marker = "/storage/v1/object/public/videos/";
+    const storagePaths: string[] = [];
+    const variantIds: string[] = [];
+    for (const v of variants as { id: string; output_url: string | null; thumbnail_url?: string | null }[]) {
+      if (v.output_url) {
+        const idx = v.output_url.indexOf(marker);
+        if (idx !== -1) storagePaths.push(v.output_url.substring(idx + marker.length));
+      }
+      if (v.thumbnail_url) {
+        const idx = v.thumbnail_url.indexOf(marker);
+        if (idx !== -1) storagePaths.push(v.thumbnail_url.substring(idx + marker.length));
+      }
+      variantIds.push(v.id);
+    }
+    if (storagePaths.length > 0) {
+      await supabase.storage.from("videos").remove(storagePaths);
+    }
+    if (variantIds.length > 0) {
+      for (const vid of variantIds) {
+        await supabase.from("variants").update({ output_url: null, thumbnail_url: null }).eq("id", vid);
+      }
+    }
+    fetchData();
+
     setBulkExporting(false);
   };
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import type { Caption, CaptionGroup } from "@/lib/api";
 
@@ -23,11 +23,27 @@ const SNAP_POINTS = [
 ];
 const SNAP_THRESHOLD = 3;
 
+// Parse position string: "Y,X" exact coords, or legacy "top"/"center"/"bottom"
+function parsePosition(pos?: string): { y: number; x: number } {
+  if (!pos) return { y: PRESET_Y.bottom, x: 50 };
+  if (pos.includes(",")) {
+    const [y, x] = pos.split(",").map(Number);
+    return { y: isNaN(y) ? PRESET_Y.bottom : y, x: isNaN(x) ? 50 : x };
+  }
+  if (pos === "top") return { y: PRESET_Y.top, x: 50 };
+  if (pos === "center") return { y: PRESET_Y.center, x: 50 };
+  if (pos === "bottom") return { y: PRESET_Y.bottom, x: 50 };
+  const n = parseFloat(pos);
+  if (!isNaN(n)) return { y: n, x: 50 };
+  return { y: PRESET_Y.bottom, x: 50 };
+}
+
 export default function CaptionEditor({ caption, groups, initialGroupIds, onSave, onCreateGroup, onClose }: CaptionEditorProps) {
+  const initPos = parsePosition(caption?.position);
   const [text, setText] = useState(caption?.text ?? "");
   const [groupIds, setGroupIds] = useState<string[]>(initialGroupIds ?? []);
-  const [customY, setCustomY] = useState<number>(PRESET_Y[caption?.position ?? "bottom"]);
-  const [customX, setCustomX] = useState<number>(50);
+  const [customY, setCustomY] = useState<number>(initPos.y);
+  const [customX, setCustomX] = useState<number>(initPos.x);
   const [fontSize, setFontSize] = useState(caption?.font_size ?? 24);
   const [fontColor, setFontColor] = useState(caption?.font_color ?? "#FFFFFF");
   const [strokeColor, setStrokeColor] = useState(caption?.stroke_color ?? "#000000");
@@ -65,7 +81,7 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
   const snapX = (raw: number) => Math.abs(raw - 50) < SNAP_THRESHOLD ? 50 : raw;
   const isXCentered = Math.abs(customX - 50) < 1.5;
 
-  // Drag handlers
+  // Drag handlers — only for moving position, never changes size
   const calcPos = useCallback((clientX: number, clientY: number) => {
     if (!previewRef.current) return null;
     const rect = previewRef.current.getBoundingClientRect();
@@ -78,6 +94,7 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
   }, []);
 
   const handlePointerDown = (e: React.PointerEvent) => {
+    if (isResizing) return; // don't start drag while resizing
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     setIsDragging(true);
@@ -90,12 +107,6 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (isResizing) {
-      const deltaY = resizeStartY - e.clientY;
-      const newScale = Math.max(0.3, Math.min(3, resizeStartScale + deltaY * 0.008));
-      setTextScale(Math.round(newScale * 100) / 100);
-      return;
-    }
     if (!isDragging) return;
     const pos = calcPos(e.clientX, e.clientY);
     if (pos) {
@@ -106,10 +117,10 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
 
   const handlePointerUp = () => {
     setIsDragging(false);
-    setIsResizing(false);
     setTimeout(() => setShowGuides(false), 400);
   };
 
+  // Resize handlers — only for scaling, separate from drag
   const handleResizeDown = (e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -119,18 +130,26 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
     setResizeStartScale(textScale);
   };
 
-  // Map back to enum for save
-  const getPosition = (): Caption["position"] => {
-    if (customY < 25) return "top";
-    if (customY > 75) return "bottom";
-    return "center";
+  const handleResizeMove = (e: React.PointerEvent) => {
+    if (!isResizing) return;
+    const deltaY = resizeStartY - e.clientY;
+    const newScale = Math.max(0.3, Math.min(3, resizeStartScale + deltaY * 0.008));
+    setTextScale(Math.round(newScale * 100) / 100);
   };
+
+  const handleResizeUp = () => {
+    setIsResizing(false);
+  };
+
+  // Save exact Y,X coordinates as string
+  const getPosition = (): string => `${Math.round(customY * 10) / 10},${Math.round(customX * 10) / 10}`;
 
   // Active preset check
   const isPresetActive = (pos: "top" | "center" | "bottom") =>
     Math.abs(customY - PRESET_Y[pos]) < SNAP_THRESHOLD;
 
-  const previewFontSize = Math.max(8, fontSize * 0.35);
+  const effectiveFontSize = Math.round(fontSize * textScale);
+  const previewFontSize = Math.max(8, effectiveFontSize * 0.35);
   const previewStrokeWidth = Math.max(0.5, previewFontSize * 0.16);
 
   // Which snap point is currently snapped
@@ -274,14 +293,16 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
               <div>
                 <div className="flex justify-between items-center text-xs font-medium mb-2.5" style={{ color: "var(--color-ink-2)" }}>
                   <span>Font size</span>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", color: "var(--color-accent-hover)" }}>{fontSize}px</span>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", color: "var(--color-accent-hover)" }}>
+                    {effectiveFontSize}px
+                  </span>
                 </div>
                 <input
                   type="range"
                   min="12"
                   max="72"
                   value={fontSize}
-                  onChange={(e) => setFontSize(Number(e.target.value))}
+                  onChange={(e) => { setFontSize(Number(e.target.value)); setTextScale(1); }}
                   className="w-full h-1 rounded-full appearance-none"
                   style={{ background: "var(--color-surface-2)", accentColor: "var(--color-accent)" }}
                 />
@@ -334,12 +355,12 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
                 style={{
                   aspectRatio: "9/16",
                   background: "linear-gradient(180deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
-                  cursor: text ? (isResizing ? "ns-resize" : isDragging ? "grabbing" : "grab") : "default",
+                  cursor: text ? (isDragging ? "grabbing" : "grab") : "default",
                   touchAction: "none",
                 }}
                 onPointerDown={text ? handlePointerDown : undefined}
-                onPointerMove={(text ? handlePointerMove : undefined)}
-                onPointerUp={(text ? handlePointerUp : undefined)}
+                onPointerMove={text ? handlePointerMove : undefined}
+                onPointerUp={text ? handlePointerUp : undefined}
               >
                 {/* Snap guide lines */}
                 {(isDragging || showGuides) && SNAP_POINTS.map((snap) => {
@@ -390,30 +411,34 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
                   />
                 )}
 
-                {/* Caption text with resize handles */}
+                {/* Caption text — fixed width container prevents reflow near edges */}
                 {text && (
                   <div
-                    className="absolute text-center pointer-events-none"
+                    className="absolute pointer-events-none"
                     style={{
                       top: `${customY}%`,
-                      left: `${customX}%`,
-                      transform: `translate(-50%, -50%) scale(${textScale})`,
-                      transition: isDragging || isResizing ? "none" : "top 150ms, left 150ms, transform 150ms",
+                      left: "50%",
+                      width: 170,
+                      textAlign: "center",
+                      transform: `translate(-50%, -50%) translateX(${((customX - 50) / 100) * (previewRef.current?.offsetWidth ?? 200)}px)`,
+                      transition: isDragging || isResizing ? "none" : "top 150ms, transform 150ms",
                     }}
                   >
-                    {/* Bounding box */}
+                    {/* Bounding box — inline-block to hug text tightly */}
                     <div
-                      className="relative"
+                      className="relative inline-block"
                       style={{
                         border: "1px dashed rgba(139,127,255,0.45)",
                         borderRadius: 3,
                         padding: "3px 8px",
+                        transform: `scale(${textScale})`,
+                        transformOrigin: "center center",
+                        transition: isResizing ? "none" : "transform 150ms",
                       }}
                     >
                       <div
                         style={{
-                          maxWidth: "170px",
-                          fontSize: `${previewFontSize}px`,
+                          fontSize: `${Math.max(8, fontSize * 0.35)}px`,
                           fontFamily: captionFont === "tiktok"
                             ? "'TikTok Sans', system-ui, sans-serif"
                             : "'Helvetica Neue', 'Arial', system-ui, sans-serif",
@@ -430,7 +455,7 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
                         {text}
                       </div>
 
-                      {/* Resize handles — corners */}
+                      {/* Resize handles — corners, completely separate from drag */}
                       {([
                         { top: -5, left: -5, cursor: "nwse-resize" },
                         { top: -5, right: -5, cursor: "nesw-resize" },
@@ -450,8 +475,8 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
                             cursor: pos.cursor,
                           }}
                           onPointerDown={handleResizeDown}
-                          onPointerMove={handlePointerMove}
-                          onPointerUp={handlePointerUp}
+                          onPointerMove={handleResizeMove}
+                          onPointerUp={handleResizeUp}
                         />
                       ))}
                     </div>
@@ -501,7 +526,7 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
             color: "var(--color-ink-2)",
           }}>Cancel</button>
           <button
-            onClick={() => onSave({ text, position: getPosition(), font_size: Math.round(fontSize * textScale), font_color: fontColor, stroke_color: strokeEnabled ? strokeColor : "transparent", font_family: captionFont }, groupIds)}
+            onClick={() => onSave({ text, position: getPosition(), font_size: effectiveFontSize, font_color: fontColor, stroke_color: strokeEnabled ? strokeColor : "transparent", font_family: captionFont }, groupIds)}
             className="text-[13px] font-medium px-4 py-2 rounded-lg text-white transition-all hover:-translate-y-px"
             style={{
               background: "var(--color-accent)",

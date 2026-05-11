@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
       if (cap) {
         captions = [{
           text: cap.text,
-          position: (cap.position || "bottom") as "top" | "center" | "bottom",
+          position: cap.position || "bottom",
           fontSize: cap.font_size || 24,
           fontColor: cap.font_color || "white",
           strokeColor: cap.stroke_color || "black",
@@ -148,7 +148,7 @@ export async function POST(req: NextRequest) {
         if (caps && caps.length > 0) {
           captions = caps.map((c) => ({
             text: c.text,
-            position: (c.position || "bottom") as "top" | "center" | "bottom",
+            position: c.position || "bottom",
             fontSize: c.font_size || 24,
             fontColor: c.font_color || "white",
             strokeColor: c.stroke_color || "black",
@@ -158,21 +158,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Process this batch of variants
+    // Process this batch of variants — collect results, upload in parallel after
     let completedCount = 0;
     console.log(`[generate] Starting generation: isImage=${isImage}, batchCount=${batchCount}, startIndex=${startIndex}, source=${sourcePath}`);
 
-    await generateAllVariants(sourcePath, tmpDir, batchCount, gpsCity, captions, async (_completed, _total, result) => {
-      const variantExt = isImage ? ".jpg" : ".mp4";
-      const variantContentType = isImage ? "image/jpeg" : "video/mp4";
-      const i = result.variantIndex;
+    // Collect all variant results first, then upload in parallel
+    const allResults = await generateAllVariants(sourcePath, tmpDir, batchCount, gpsCity, captions, undefined, startIndex, isImage, mirrorEnabled);
 
-      // Mark as processing
-      await supabase
-        .from("variants")
-        .update({ status: "processing" })
-        .eq("project_id", projectId)
-        .eq("variant_index", i);
+    // Upload all results in parallel (non-blocking between variants)
+    const variantExt = isImage ? ".jpg" : ".mp4";
+    const variantContentType = isImage ? "image/jpeg" : "video/mp4";
+
+    await Promise.all(allResults.map(async (result) => {
+      const i = result.variantIndex;
 
       console.log(`[generate] Variant ${i}: success=${result.success}, outputPath=${result.outputPath?.slice(-30)}, error=${result.error}`);
       if (result.success && result.outputPath) {
@@ -262,7 +260,7 @@ export async function POST(req: NextRequest) {
           .eq("project_id", projectId)
           .eq("variant_index", i);
       }
-    }, startIndex, isImage, mirrorEnabled);
+    }));
 
     // Update project status when this is the last batch (or the only batch)
     if (remaining === 0) {

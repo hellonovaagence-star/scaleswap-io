@@ -1,9 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { Caption, CaptionGroup } from "@/lib/api";
 
 const positionLabels: Record<string, string> = { top: "Top", center: "Center", bottom: "Bottom" };
+function getPositionLabel(pos: string): string {
+  if (positionLabels[pos]) return positionLabels[pos];
+  if (pos.includes(",")) {
+    const y = parseFloat(pos);
+    if (y < 25) return "Top";
+    if (y > 75) return "Bottom";
+    return "Center";
+  }
+  return "Custom";
+}
 
 interface CaptionGroupCardProps {
   group: CaptionGroup;
@@ -14,8 +24,22 @@ interface CaptionGroupCardProps {
 
 export default function CaptionGroupCard({ group, captions, onEdit, onDelete }: CaptionGroupCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const groupCaptions = captions.filter((c) => group.caption_ids.includes(c.id));
   const previewTexts = groupCaptions.slice(0, 3);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [menuOpen]);
 
   return (
     <div
@@ -54,28 +78,35 @@ export default function CaptionGroupCard({ group, captions, onEdit, onDelete }: 
               </p>
             )}
           </div>
-          <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+          <div className="relative shrink-0" ref={menuRef} onClick={(e) => e.stopPropagation()}>
             <button
-              onClick={(e) => {
-                const menu = e.currentTarget.nextElementSibling;
-                menu?.classList.toggle("hidden");
-              }}
+              onClick={() => setMenuOpen(!menuOpen)}
               className="w-7 h-7 inline-flex items-center justify-center rounded-[6px] transition-colors hover:bg-[var(--color-surface-2)]"
               style={{ color: "var(--color-muted-2)" }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
             </button>
-            <div className="hidden absolute right-0 top-8 z-10 min-w-[120px] rounded-lg border p-1 shadow-lg" style={{
-              background: "var(--color-surface)",
-              borderColor: "var(--color-border)",
-            }}>
-              <button onClick={() => onEdit(group)} className="w-full text-left text-[13px] px-2.5 py-1.5 rounded-md transition-colors hover:bg-[var(--color-surface-2)]" style={{ color: "var(--color-ink-2)" }}>
-                Edit
-              </button>
-              <button onClick={() => onDelete(group.id)} className="w-full text-left text-[13px] px-2.5 py-1.5 rounded-md transition-colors hover:bg-[var(--color-surface-2)]" style={{ color: "var(--color-red)" }}>
-                Delete
-              </button>
-            </div>
+            {menuOpen && (
+              <div className="absolute right-0 top-8 z-10 min-w-[120px] rounded-lg border p-1 shadow-lg" style={{
+                background: "var(--color-surface)",
+                borderColor: "var(--color-border)",
+              }}>
+                <button
+                  onClick={() => { setMenuOpen(false); onEdit(group); }}
+                  className="w-full text-left text-[13px] px-2.5 py-1.5 rounded-md transition-colors hover:bg-[var(--color-surface-2)]"
+                  style={{ color: "var(--color-ink-2)" }}
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => { setMenuOpen(false); onDelete(group.id); }}
+                  className="w-full text-left text-[13px] px-2.5 py-1.5 rounded-md transition-colors hover:bg-[var(--color-surface-2)]"
+                  style={{ color: "var(--color-red)" }}
+                >
+                  Delete
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -127,7 +158,7 @@ export default function CaptionGroupCard({ group, captions, onEdit, onDelete }: 
                       background: "var(--color-accent-soft)",
                       color: "var(--color-accent-hover)",
                     }}>
-                      {positionLabels[c.position] || c.position}
+                      {getPositionLabel(c.position)}
                     </span>
                     <span className="flex items-center gap-1 text-[10.5px]" style={{ color: "var(--color-muted-2)" }}>
                       <span className="w-2.5 h-2.5 rounded-sm border" style={{
