@@ -15,9 +15,12 @@ interface ProjectCardProps {
   mediaType?: "video" | "image";
   onDelete?: (id: string) => void;
   onRename?: (id: string, newTitle: string) => void;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: string) => void;
 }
 
-export default function ProjectCard({ id, title, gradient, variantInfo, ratio, duration, timeAgo, sourceUrl, mediaType = "video", onDelete, onRename }: ProjectCardProps) {
+export default function ProjectCard({ id, title, gradient, variantInfo, ratio, duration, timeAgo, sourceUrl, mediaType = "video", onDelete, onRename, selectable, selected, onToggleSelect }: ProjectCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(title);
@@ -49,6 +52,23 @@ export default function ProjectCard({ id, title, gradient, variantInfo, ratio, d
 
   return (
     <div className="relative group">
+      {/* Selection checkbox */}
+      {selectable && (
+        <button
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleSelect?.(id); }}
+          className="absolute top-2 left-2 z-20 w-6 h-6 rounded-full flex items-center justify-center transition-all"
+          style={{
+            background: selected ? "var(--color-accent)" : "rgba(0,0,0,0.45)",
+            backdropFilter: "blur(8px)",
+            border: selected ? "2px solid var(--color-accent)" : "2px solid rgba(255,255,255,0.6)",
+          }}
+        >
+          {selected && (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          )}
+        </button>
+      )}
+
       {/* 3-dot menu button */}
       <div ref={menuRef}>
         <button
@@ -122,12 +142,18 @@ export default function ProjectCard({ id, title, gradient, variantInfo, ratio, d
         </div>
       )}
 
-      <Link href={`/library/${id}`}
+      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
+      <div
+        onClick={selectable ? (e) => { e.preventDefault(); onToggleSelect?.(id); } : undefined}
+      >
+      <Link href={selectable ? "#" : `/library/${id}`}
         className="block rounded-[14px] p-3 border transition-all duration-200 cursor-pointer hover:-translate-y-0.5"
         style={{
           background: "var(--color-surface)",
-          borderColor: "var(--color-border-soft)",
+          borderColor: selected ? "var(--color-accent)" : "var(--color-border-soft)",
+          boxShadow: selected ? "0 0 0 2px var(--color-accent-ring)" : undefined,
         }}
+        onClick={selectable ? (e) => e.preventDefault() : undefined}
       >
         <div className="rounded-[10px] overflow-hidden relative mb-3" style={{ aspectRatio: "9/16" }}>
           {sourceUrl ? (
@@ -148,7 +174,7 @@ export default function ProjectCard({ id, title, gradient, variantInfo, ratio, d
           ) : (
             <div className="absolute inset-0" style={{ background: gradient }} />
           )}
-          <span className="absolute top-2 left-2 text-[10.5px] font-semibold px-[7px] py-[3px] rounded-[5px] backdrop-blur-lg" style={{
+          <span className={`absolute ${selectable ? "top-2 left-10" : "top-2 left-2"} text-[10.5px] font-semibold px-[7px] py-[3px] rounded-[5px] backdrop-blur-lg`} style={{
             background: "var(--color-surface)",
             color: "var(--color-ink)",
             letterSpacing: "0.02em",
@@ -165,6 +191,7 @@ export default function ProjectCard({ id, title, gradient, variantInfo, ratio, d
           <span>{timeAgo}</span>
         </div>
       </Link>
+      </div>
     </div>
   );
 }

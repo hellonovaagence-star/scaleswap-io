@@ -2,6 +2,16 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function updateSession(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // Gate: require access code before anything else
+  const hasAccess = request.cookies.get("site-access")?.value === "granted";
+  if (!hasAccess && pathname !== "/gate" && !pathname.startsWith("/api/gate")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/gate";
+    return NextResponse.redirect(url);
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -27,9 +37,19 @@ export async function updateSession(request: NextRequest) {
 
   const {
     data: { user },
+    error,
   } = await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
+  // If the token is invalid/expired, clear auth cookies so stale JWTs
+  // don't break signup/login requests
+  if (error) {
+    request.cookies.getAll().forEach(({ name }) => {
+      if (name.startsWith("sb-")) {
+        request.cookies.delete(name);
+        supabaseResponse.cookies.delete(name);
+      }
+    });
+  }
 
   // Auth routes - redirect to /library if already logged in
   if (user && (pathname === "/login" || pathname === "/signup")) {

@@ -33,6 +33,10 @@ export default function SignupPage() {
     setLoading(true);
 
     const supabase = createClient();
+
+    // Clear any stale session that could send an invalid JWT
+    await supabase.auth.signOut();
+
     const { error } = await supabase.auth.signUp({
       email,
       password,

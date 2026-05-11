@@ -60,6 +60,16 @@ function FaqAccordion({ items }: { items: { q: string; a: string }[] }) {
 }
 
 export default function LandingPage() {
+  // Force light mode on the landing page
+  useEffect(() => {
+    const el = document.documentElement;
+    const wasDark = el.classList.contains("dark");
+    if (wasDark) el.classList.remove("dark");
+    return () => {
+      if (wasDark) el.classList.add("dark");
+    };
+  }, []);
+
   return (
     <SmoothScroll>
       {/* NAV */}
@@ -68,12 +78,14 @@ export default function LandingPage() {
         backdropFilter: "blur(40px)",
         WebkitBackdropFilter: "blur(40px)",
       }}>
-        <div className="max-w-[1180px] mx-auto px-7 flex items-center justify-between h-16">
+        <div className="max-w-[1180px] mx-auto px-7 grid grid-cols-3 items-center h-16">
+          {/* Left: Logo */}
           <div className="flex items-center gap-2 text-base" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
             <Image src="/scaleswap-logo.svg" alt="Scaleswap" width={22} height={22} />
             Scaleswap
           </div>
-          <ul className="hidden md:flex gap-7 list-none">
+          {/* Center: Nav links */}
+          <ul className="hidden md:flex gap-7 list-none justify-center">
             {[
               { label: "Product", href: "#top" },
               { label: "Pricing", href: "#pricing" },
@@ -84,15 +96,13 @@ export default function LandingPage() {
               </li>
             ))}
           </ul>
-          <div className="flex items-center gap-2.5">
+          {/* Right: Discord + CTA */}
+          <div className="flex items-center gap-2.5 justify-end">
             <a href="https://discord.gg/t3ZjPbrFBY" target="_blank" rel="noopener noreferrer" className="hidden md:inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-[9px] transition-all duration-150" style={{ color: "var(--color-ink-2)" }}>
               <Image src="/discord-logo.png" alt="Discord" width={16} height={16} style={{ opacity: 0.7 }} />
               Discord
             </a>
-            <Link href="/projects" className="text-sm font-medium px-3.5 py-2 rounded-[9px] transition-all duration-150" style={{ color: "var(--color-ink-2)" }}>
-              Sign in
-            </Link>
-            <Link href="/upload" className="text-sm font-medium px-3.5 py-2.5 rounded-[9px] text-white transition-all duration-150" style={{
+            <Link href="/signup" className="text-sm font-medium px-3.5 py-2.5 rounded-[9px] text-white transition-all duration-150" style={{
               background: "var(--color-ink)",
               boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.1)",
             }}>

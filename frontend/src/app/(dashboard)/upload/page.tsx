@@ -3,7 +3,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import UploadDropzone from "@/components/UploadDropzone";
+import BulkFileList from "@/components/BulkFileList";
+import BulkProgressPanel from "@/components/BulkProgressPanel";
 import CaptionSelector from "@/components/CaptionSelector";
+import { useBulkQueue } from "@/hooks/useBulkQueue";
 import { createClient } from "@/lib/supabase/client";
 import { GPS_CITIES } from "@/lib/gps-cities";
 
@@ -14,11 +17,26 @@ interface ProjectGroup {
   project_count: number;
 }
 
+interface BulkFile {
+  id: string;
+  file: File;
+  title: string;
+}
+
 export default function UploadPage() {
   const router = useRouter();
   const supabase = createClient();
-  const [file, setFile] = useState<File | null>(null);
-  const [projectTitle, setProjectTitle] = useState("");
+  const bulkQueue = useBulkQueue();
+
+  // Files — single or multi
+  const [files, setFiles] = useState<BulkFile[]>([]);
+  const isBulk = files.length > 1;
+  const singleFile = files.length === 1 ? files[0] : null;
+
+  // Bulk processing phase
+  const [bulkPhase, setBulkPhase] = useState<"select" | "processing" | "done">("select");
+
+  // Settings
   const [variantCount, setVariantCount] = useState(5);
   const [captionMode, setCaptionMode] = useState<"none" | "single" | "group">("none");
   const [selectedCaptionId, setSelectedCaptionId] = useState("");
@@ -40,7 +58,6 @@ export default function UploadPage() {
       .order("created_at", { ascending: false });
 
     if (groupsData) {
-      // Get member counts
       const { data: members } = await supabase.from("project_group_members").select("group_id");
       const counts: Record<string, number> = {};
       (members ?? []).forEach((m) => {
@@ -55,13 +72,38 @@ export default function UploadPage() {
     fetchGroups();
   }, [fetchGroups]);
 
-  // Auto-fill title from file name
-  const handleFileSelect = (f: File) => {
-    setFile(f);
-    if (!projectTitle) {
-      const name = f.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ");
-      setProjectTitle(name.charAt(0).toUpperCase() + name.slice(1));
+  // Watch bulk queue completion
+  useEffect(() => {
+    if (bulkPhase === "processing" && !bulkQueue.isRunning && bulkQueue.queue.length > 0) {
+      const doneCount = bulkQueue.queue.filter((q) => q.status === "ready" || q.status === "error").length;
+      if (doneCount === bulkQueue.queue.length) setBulkPhase("done");
     }
+  }, [bulkPhase, bulkQueue.isRunning, bulkQueue.queue]);
+
+  // Handle file selection — supports both single and multi
+  const handleFilesSelect = (newFiles: File[]) => {
+    const items: BulkFile[] = newFiles.map((f) => ({
+      id: crypto.randomUUID(),
+      file: f,
+      title: f.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ").replace(/^./, (c) => c.toUpperCase()),
+    }));
+    setFiles((prev) => [...prev, ...items]);
+  };
+
+  const handleSingleFileSelect = (f: File) => {
+    handleFilesSelect([f]);
+  };
+
+  const handleRemoveFile = (id: string) => {
+    setFiles((prev) => prev.filter((f) => f.id !== id));
+  };
+
+  const handleTitleChange = (id: string, title: string) => {
+    setFiles((prev) => prev.map((f) => f.id === id ? { ...f, title } : f));
+  };
+
+  const handleClearAll = () => {
+    setFiles([]);
   };
 
   const handleCreateGroup = async () => {
@@ -84,67 +126,49 @@ export default function UploadPage() {
 
   const selectedGroup = groups.find((g) => g.id === selectedGroupId);
 
-  const canGenerate = file && projectTitle.trim() && variantCount > 0;
+  const canGenerate = files.length > 0 && files.every((f) => f.title.trim()) && variantCount > 0;
 
-  const handleGenerate = async () => {
-    if (!canGenerate) return;
-    setIsGenerating(true);
-    setError("");
-
-    // Get authenticated user directly (hook may still be loading)
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    if (!authUser) {
-      setError("Not authenticated. Please log in again.");
-      setIsGenerating(false);
-      return;
-    }
-
-    // 1. Create project record
-    const isImage = file.type.startsWith("image/");
+  // Create a single project, upload, trigger generation
+  const createAndTriggerProject = async (bulkFile: BulkFile, authUser: { id: string }, batchId?: string) => {
+    const isImage = bulkFile.file.type.startsWith("image/");
     const projectType = isImage ? "image" : "video";
 
+    // 1. Create project
     const { data: project, error: insertError } = await supabase
       .from("projects")
       .insert({
         user_id: authUser.id,
-        title: projectTitle.trim(),
+        title: bulkFile.title.trim(),
         variant_count: variantCount,
         status: "draft",
         type: projectType,
+        ...(batchId ? { batch_id: batchId } : {}),
       })
       .select()
       .single();
 
     if (insertError || !project) {
-      setIsGenerating(false);
-      setError(insertError?.message || "Failed to create project.");
-      return;
+      throw new Error(insertError?.message || "Failed to create project.");
     }
 
-    // 2. Upload video to Storage
-    const ext = file.name.split(".").pop()?.toLowerCase() || (isImage ? "jpg" : "mp4");
+    // 2. Upload source file
+    const ext = bulkFile.file.name.split(".").pop()?.toLowerCase() || (isImage ? "jpg" : "mp4");
     const storagePath = `${authUser.id}/${project.id}/source.${ext}`;
 
     const { error: uploadError } = await supabase.storage
       .from("videos")
-      .upload(storagePath, file, { cacheControl: "3600", upsert: true });
+      .upload(storagePath, bulkFile.file, { cacheControl: "3600", upsert: true });
 
     if (uploadError) {
-      setIsGenerating(false);
-      setError(`Upload failed: ${uploadError.message}`);
-      // Clean up the project record
       await supabase.from("projects").delete().eq("id", project.id);
-      return;
+      throw new Error(`Upload failed: ${uploadError.message}`);
     }
 
-    // 3. Get public URL and save to project
+    // 3. Get public URL
     const { data: urlData } = supabase.storage.from("videos").getPublicUrl(storagePath);
-    await supabase
-      .from("projects")
-      .update({ source_url: urlData.publicUrl })
-      .eq("id", project.id);
+    await supabase.from("projects").update({ source_url: urlData.publicUrl }).eq("id", project.id);
 
-    // 4. If group selected, add to group
+    // 4. Add to group
     if (selectedGroupId) {
       await supabase.from("project_group_members").insert({
         project_id: project.id,
@@ -152,7 +176,7 @@ export default function UploadPage() {
       });
     }
 
-    // 5. Create variant records (pending — real processing happens server-side)
+    // 5. Create variant records
     const variantRows = Array.from({ length: variantCount }, (_, i) => ({
       project_id: project.id,
       user_id: authUser.id,
@@ -162,39 +186,119 @@ export default function UploadPage() {
     }));
 
     const { error: variantError } = await supabase.from("variants").insert(variantRows);
-    if (variantError) {
+    if (variantError) throw new Error(`Variants creation failed: ${variantError.message}`);
+
+    // 6. Update status
+    await supabase.from("projects").update({ status: "processing" }).eq("id", project.id);
+
+    return {
+      projectId: project.id,
+      sourceUrl: urlData.publicUrl,
+      projectType,
+    };
+  };
+
+  const handleGenerate = async () => {
+    if (!canGenerate) return;
+    setIsGenerating(true);
+    setError("");
+
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) {
+      setError("Not authenticated. Please log in again.");
       setIsGenerating(false);
-      setError(`Variants creation failed: ${variantError.message}`);
       return;
     }
 
-    // 6. Update project status to processing
-    await supabase
-      .from("projects")
-      .update({ status: "processing" })
-      .eq("id", project.id);
+    if (!isBulk) {
+      // Single file — same flow as before, redirect to detail page
+      try {
+        const result = await createAndTriggerProject(files[0], authUser);
 
-    // 7. Fire-and-forget: trigger video generation (server handles all variants)
-    fetch("/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        projectId: project.id,
-        sourceUrl: urlData.publicUrl,
-        variantCount,
-        userId: authUser.id,
-        gpsCity: gpsCity || undefined,
-        captionId: captionMode === "single" && selectedCaptionId ? selectedCaptionId : undefined,
-        captionGroupId: captionMode === "group" && selectedCaptionGroupId ? selectedCaptionGroupId : undefined,
-        projectType,
-        mirrorEnabled,
-      }),
-    }).catch(() => {});
+        // Fire-and-forget
+        fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectId: result.projectId,
+            sourceUrl: result.sourceUrl,
+            variantCount,
+            userId: authUser.id,
+            gpsCity: gpsCity || undefined,
+            captionId: captionMode === "single" && selectedCaptionId ? selectedCaptionId : undefined,
+            captionGroupId: captionMode === "group" && selectedCaptionGroupId ? selectedCaptionGroupId : undefined,
+            projectType: result.projectType,
+            mirrorEnabled,
+          }),
+        }).catch(() => {});
 
-    router.push(`/library/${project.id}`);
+        router.push(`/library/${result.projectId}`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to create project.");
+        setIsGenerating(false);
+      }
+      return;
+    }
+
+    // Bulk — create all projects, then queue
+    const batchId = crypto.randomUUID();
+    for (const bulkFile of files) {
+      try {
+        const result = await createAndTriggerProject(bulkFile, authUser, batchId);
+
+        bulkQueue.addToQueue({
+          projectId: result.projectId,
+          title: bulkFile.title,
+          sourceUrl: result.sourceUrl,
+          generatePayload: {
+            projectId: result.projectId,
+            sourceUrl: result.sourceUrl,
+            variantCount,
+            userId: authUser.id,
+            gpsCity: gpsCity || undefined,
+            captionId: captionMode === "single" && selectedCaptionId ? selectedCaptionId : undefined,
+            captionGroupId: captionMode === "group" && selectedCaptionGroupId ? selectedCaptionGroupId : undefined,
+            projectType: result.projectType,
+            mirrorEnabled,
+          },
+        });
+      } catch (err) {
+        setError(`Error for "${bulkFile.title}": ${err instanceof Error ? err.message : "Unknown error"}`);
+      }
+    }
+
+    setBulkPhase("processing");
+    setIsGenerating(false);
+
+    setTimeout(() => {
+      bulkQueue.startQueue();
+    }, 100);
   };
 
   const variantPresets = [1, 3, 5, 10, 15, 25];
+
+  // Bulk processing/done phase
+  if (bulkPhase === "processing" || bulkPhase === "done") {
+    return (
+      <div className="flex flex-col h-[calc(100vh-80px-60px)]">
+        <div className="flex items-end justify-between mb-5 gap-4">
+          <div>
+            <h1 className="text-2xl font-[550] tracking-tight leading-tight" style={{ letterSpacing: "-0.025em" }}>
+              New <em className="not-italic font-normal" style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontStyle: "italic", color: "var(--color-accent)" }}>project</em>
+            </h1>
+            <p className="text-[13.5px] mt-1" style={{ color: "var(--color-muted)" }}>
+              {bulkPhase === "done" ? "All projects have been processed" : "Processing your projects sequentially..."}
+            </p>
+          </div>
+        </div>
+        <BulkProgressPanel
+          queue={bulkQueue.queue}
+          currentIndex={bulkQueue.currentIndex}
+          isRunning={bulkQueue.isRunning}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-80px-60px)]">
@@ -207,15 +311,39 @@ export default function UploadPage() {
         </div>
       </div>
 
-      {/* Step 1: Upload */}
-      <UploadDropzone
-        file={file}
-        onFileSelect={handleFileSelect}
-        onRemove={() => { setFile(null); setProjectTitle(""); }}
-      />
+      {/* Upload dropzone — always multiple */}
+      {files.length === 0 ? (
+        <UploadDropzone
+          multiple
+          onFilesSelect={handleFilesSelect}
+          onFileSelect={handleSingleFileSelect}
+        />
+      ) : !isBulk ? (
+        /* Single file — show inline preview */
+        <UploadDropzone
+          file={singleFile?.file}
+          onFileSelect={(f) => {
+            setFiles([{ id: crypto.randomUUID(), file: f, title: f.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ").replace(/^./, (c) => c.toUpperCase()) }]);
+          }}
+          onRemove={handleClearAll}
+        />
+      ) : (
+        /* Multi files — show file list + "add more" dropzone */
+        <div className="space-y-3">
+          <BulkFileList
+            files={files}
+            onRemove={handleRemoveFile}
+            onTitleChange={handleTitleChange}
+          />
+          <UploadDropzone
+            multiple
+            onFilesSelect={handleFilesSelect}
+          />
+        </div>
+      )}
 
-      {/* Tagline — only when no file yet, centered in remaining space */}
-      {!file && (
+      {/* Tagline — only when no file yet */}
+      {files.length === 0 && (
         <div className="flex-1 flex items-center justify-center">
           <p className="text-center text-[28px] font-[450] tracking-tight" style={{ color: "var(--color-muted-2)", letterSpacing: "-0.02em" }}>
             <span style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontStyle: "italic", color: "var(--color-accent)", fontSize: "32px" }}>Scale</span>{" "}
@@ -228,8 +356,8 @@ export default function UploadPage() {
         </div>
       )}
 
-      {/* Step 2: Project settings — visible after file upload */}
-      {file && (
+      {/* Settings — visible after file(s) selected */}
+      {files.length > 0 && (
         <div className="mt-5 space-y-4 animate-page-fade">
           {/* Project title + Variant count */}
           <div className="rounded-[14px] border p-5" style={{
@@ -245,32 +373,40 @@ export default function UploadPage() {
               </div>
               <div>
                 <div className="text-[13.5px] font-medium" style={{ color: "var(--color-ink)" }}>Project settings</div>
-                <div className="text-[12px]" style={{ color: "var(--color-muted)" }}>Name your project and choose how many variants</div>
+                <div className="text-[12px]" style={{ color: "var(--color-muted)" }}>
+                  {isBulk ? `Settings applied to all ${files.length} files` : "Name your project and choose how many variants"}
+                </div>
               </div>
             </div>
 
-            {/* Title */}
-            <div className="mb-4">
-              <label className="text-[12px] font-medium mb-1.5 block" style={{ color: "var(--color-ink-2)" }}>Project title</label>
-              <input
-                type="text"
-                value={projectTitle}
-                onChange={(e) => setProjectTitle(e.target.value)}
-                placeholder="e.g. Gym motivation hook"
-                className="w-full text-[13px] px-3 py-[9px] rounded-[8px] border outline-none transition-all focus:ring-2"
-                style={{
-                  background: "var(--color-surface)",
-                  borderColor: "var(--color-border)",
-                  color: "var(--color-ink)",
-                  // @ts-expect-error CSS custom property
-                  "--tw-ring-color": "var(--color-accent-ring)",
-                }}
-              />
-            </div>
+            {/* Title — only for single file */}
+            {!isBulk && (
+              <div className="mb-4">
+                <label className="text-[12px] font-medium mb-1.5 block" style={{ color: "var(--color-ink-2)" }}>Project title</label>
+                <input
+                  type="text"
+                  value={singleFile?.title || ""}
+                  onChange={(e) => {
+                    if (singleFile) handleTitleChange(singleFile.id, e.target.value);
+                  }}
+                  placeholder="e.g. Gym motivation hook"
+                  className="w-full text-[13px] px-3 py-[9px] rounded-[8px] border outline-none transition-all focus:ring-2"
+                  style={{
+                    background: "var(--color-surface)",
+                    borderColor: "var(--color-border)",
+                    color: "var(--color-ink)",
+                    // @ts-expect-error CSS custom property
+                    "--tw-ring-color": "var(--color-accent-ring)",
+                  }}
+                />
+              </div>
+            )}
 
             {/* Variant count */}
             <div>
-              <label className="text-[12px] font-medium mb-1.5 block" style={{ color: "var(--color-ink-2)" }}>Number of variants</label>
+              <label className="text-[12px] font-medium mb-1.5 block" style={{ color: "var(--color-ink-2)" }}>
+                Number of variants{isBulk ? " per file" : ""}
+              </label>
               <div className="flex items-center gap-2">
                 {variantPresets.map((n) => (
                   <button
@@ -517,9 +653,11 @@ export default function UploadPage() {
           )}
 
           {/* Generate button */}
-          <div className="flex items-center justify-between pt-2">
+          <div className="flex items-center justify-between pt-2 pb-6">
             <div className="text-[12px]" style={{ color: "var(--color-muted)" }}>
-              {variantCount} variant{variantCount !== 1 ? "s" : ""} will be generated
+              {isBulk
+                ? `${files.length} files · ${variantCount} variant${variantCount !== 1 ? "s" : ""} each · ${files.length * variantCount} total`
+                : `${variantCount} variant${variantCount !== 1 ? "s" : ""} will be generated`}
               {selectedGroup ? ` · Added to "${selectedGroup.name}"` : ""}
               {captionMode !== "none" && (selectedCaptionId || selectedCaptionGroupId) ? " · With captions" : ""}
             </div>
@@ -535,12 +673,12 @@ export default function UploadPage() {
               {isGenerating ? (
                 <>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
-                  Creating project...
+                  {isBulk ? "Creating projects..." : "Creating project..."}
                 </>
               ) : (
                 <>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                  Generate variants
+                  {isBulk ? `Generate all (${files.length})` : "Generate variants"}
                 </>
               )}
             </button>

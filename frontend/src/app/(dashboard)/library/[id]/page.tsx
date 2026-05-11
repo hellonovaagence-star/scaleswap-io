@@ -1,7 +1,8 @@
 "use client";
 
-import { use, useEffect, useState, useCallback } from "react";
+import { use, useEffect, useState, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import VariationCard from "@/components/VariationCard";
 import CaptionSelector from "@/components/CaptionSelector";
 import { createClient } from "@/lib/supabase/client";
@@ -28,6 +29,7 @@ interface Project {
   source_url: string | null;
   created_at: string;
   type?: string;
+  batch_id?: string | null;
 }
 
 interface Variant {
@@ -71,6 +73,9 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
   const [genCaptionId, setGenCaptionId] = useState("");
   const [genCaptionGroupId, setGenCaptionGroupId] = useState("");
   const [genMirror, setGenMirror] = useState(false);
+  const [batchSiblings, setBatchSiblings] = useState<Project[]>([]);
+  const batchStripRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
   const supabase = createClient();
 
   const fetchData = useCallback(async () => {
@@ -86,6 +91,31 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Fetch batch siblings when project has a batch_id
+  useEffect(() => {
+    if (!project?.batch_id) {
+      setBatchSiblings([]);
+      return;
+    }
+    const fetchSiblings = async () => {
+      const { data } = await supabase
+        .from("projects")
+        .select("*")
+        .eq("batch_id", project.batch_id!)
+        .order("created_at");
+      setBatchSiblings(data ?? []);
+    };
+    fetchSiblings();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.batch_id]);
+
+  // Scroll active item into view in batch strip
+  useEffect(() => {
+    if (batchSiblings.length <= 1 || !batchStripRef.current) return;
+    const activeEl = batchStripRef.current.querySelector('[data-active="true"]');
+    if (activeEl) activeEl.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  }, [batchSiblings, id]);
 
   // Poll variants every 2s while project is processing (max 10 min)
   useEffect(() => {
@@ -310,6 +340,56 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
           }}>Delete</button>
         </div>
       </div>
+
+      {/* Batch navigation strip */}
+      {batchSiblings.length > 1 && (
+        <div
+          ref={batchStripRef}
+          className="flex gap-2.5 mb-5 pb-2 -mx-1 px-1"
+          style={{
+            overflowX: "auto",
+            scrollSnapType: "x mandatory",
+            scrollbarWidth: "none",
+          }}
+        >
+          {batchSiblings.map((s) => {
+            const isActive = s.id === id;
+            return (
+              <button
+                key={s.id}
+                data-active={isActive}
+                onClick={() => router.push(`/library/${s.id}`)}
+                className="shrink-0 flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] border transition-all"
+                style={{
+                  scrollSnapAlign: "center",
+                  background: isActive ? "var(--color-accent-soft)" : "var(--color-surface)",
+                  borderColor: isActive ? "var(--color-accent)" : "var(--color-border-soft)",
+                  boxShadow: isActive ? "0 0 0 2px var(--color-accent-ring)" : "0 1px 2px rgba(0,0,0,0.04)",
+                }}
+              >
+                <div
+                  className="w-10 h-10 rounded-[6px] overflow-hidden shrink-0"
+                  style={{ background: gradients[batchSiblings.indexOf(s) % gradients.length] }}
+                >
+                  {s.source_url && (
+                    s.type === "image" ? (
+                      <img src={s.source_url} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <video src={`${s.source_url}#t=0.1`} muted playsInline preload="metadata" className="w-full h-full object-cover" />
+                    )
+                  )}
+                </div>
+                <span
+                  className="text-[12px] font-medium max-w-[100px] truncate"
+                  style={{ color: isActive ? "var(--color-accent-hover)" : "var(--color-ink-2)" }}
+                >
+                  {s.title}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Main content */}
       <div>

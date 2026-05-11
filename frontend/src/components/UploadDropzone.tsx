@@ -5,7 +5,9 @@ import { useState, useCallback, useRef, useEffect } from "react";
 interface UploadDropzoneProps {
   file?: File | null;
   onFileSelect?: (file: File) => void;
+  onFilesSelect?: (files: File[]) => void;
   onRemove?: () => void;
+  multiple?: boolean;
 }
 
 function formatFileSize(bytes: number) {
@@ -19,7 +21,7 @@ function formatDuration(seconds: number) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export default function UploadDropzone({ file, onFileSelect, onRemove }: UploadDropzoneProps) {
+export default function UploadDropzone({ file, onFileSelect, onFilesSelect, onRemove, multiple = false }: UploadDropzoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
@@ -92,21 +94,33 @@ export default function UploadDropzone({ file, onFileSelect, onRemove }: UploadD
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    const f = e.dataTransfer.files[0];
-    if (!f) return;
     const supportedImageTypes = ["image/jpeg", "image/png", "image/webp"];
-    if (f.type.startsWith("video/") || supportedImageTypes.includes(f.type)) {
-      onFileSelect?.(f);
+    const isSupported = (f: File) => f.type.startsWith("video/") || supportedImageTypes.includes(f.type);
+
+    if (multiple) {
+      const valid = Array.from(e.dataTransfer.files).filter(isSupported);
+      if (valid.length > 0) onFilesSelect?.(valid);
+    } else {
+      const f = e.dataTransfer.files[0];
+      if (f && isSupported(f)) onFileSelect?.(f);
     }
-  }, [onFileSelect]);
+  }, [onFileSelect, onFilesSelect, multiple]);
 
   const handleClick = () => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "video/*,image/jpeg,image/png,image/webp";
+    if (multiple) input.multiple = true;
     input.onchange = (e) => {
-      const f = (e.target as HTMLInputElement).files?.[0];
-      if (f) onFileSelect?.(f);
+      const fileList = (e.target as HTMLInputElement).files;
+      if (!fileList) return;
+      if (multiple) {
+        const files = Array.from(fileList);
+        if (files.length > 0) onFilesSelect?.(files);
+      } else {
+        const f = fileList[0];
+        if (f) onFileSelect?.(f);
+      }
     };
     input.click();
   };
@@ -185,14 +199,38 @@ export default function UploadDropzone({ file, onFileSelect, onRemove }: UploadD
     );
   }
 
+  const handleClickSingle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "video/*,image/jpeg,image/png,image/webp";
+    input.onchange = (ev) => {
+      const f = (ev.target as HTMLInputElement).files?.[0];
+      if (f) onFileSelect?.(f);
+    };
+    input.click();
+  };
+
+  const handleClickBulk = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "video/*,image/jpeg,image/png,image/webp";
+    input.multiple = true;
+    input.onchange = (ev) => {
+      const fileList = (ev.target as HTMLInputElement).files;
+      if (fileList && fileList.length > 0) onFilesSelect?.(Array.from(fileList));
+    };
+    input.click();
+  };
+
   // No file — show dropzone
   return (
     <div
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      onClick={handleClick}
-      className="rounded-[18px] px-16 py-10 text-center transition-all duration-200 cursor-pointer"
+      className="rounded-[18px] px-16 py-10 text-center transition-all duration-200"
       style={{
         background: isDragging ? "var(--color-accent-soft)" : "var(--color-surface)",
         border: `2px dashed ${isDragging ? "var(--color-accent)" : "var(--color-border)"}`,
@@ -205,18 +243,39 @@ export default function UploadDropzone({ file, onFileSelect, onRemove }: UploadD
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
       </div>
       <h3 className="text-lg font-semibold tracking-tight mb-1.5" style={{ letterSpacing: "-0.02em" }}>
-        Drag your file here
+        Drag your file{multiple ? "s" : ""} here
       </h3>
       <p className="text-[13.5px] mb-6" style={{ color: "var(--color-muted)" }}>
-        or click to select a file from your device
+        or choose how to upload below
       </p>
-      <button className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-[9px] text-white" style={{
-        background: "var(--color-accent)",
-        boxShadow: "0 2px 6px rgba(139,127,255,0.3)",
-      }}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        Browse files
-      </button>
+      {multiple ? (
+        <div className="flex items-center justify-center gap-3">
+          <button onClick={handleClickSingle} className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-[9px] border transition-all hover:-translate-y-0.5" style={{
+            background: "var(--color-surface)",
+            borderColor: "var(--color-border)",
+            color: "var(--color-ink-2)",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+            Single file
+          </button>
+          <button onClick={handleClickBulk} className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-[9px] text-white transition-all hover:-translate-y-0.5" style={{
+            background: "var(--color-accent)",
+            boxShadow: "0 2px 6px rgba(139,127,255,0.3)",
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 2H8l-2 5h12L16 2z"/></svg>
+            Bulk upload
+          </button>
+        </div>
+      ) : (
+        <button onClick={handleClick} className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-[9px] text-white cursor-pointer" style={{
+          background: "var(--color-accent)",
+          boxShadow: "0 2px 6px rgba(139,127,255,0.3)",
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Browse files
+        </button>
+      )}
       <div className="flex items-center justify-center gap-1 mt-5">
         {["MP4", "MOV", "AVI", "WEBM", "JPG", "PNG", "WEBP"].map((fmt) => (
           <span key={fmt} className="text-[11px] px-2 py-0.5 rounded-[5px]" style={{
