@@ -515,8 +515,8 @@ function getZoomFilter(rng: () => number): string {
   // 1-2.5% zoom — shifts pixel grid mapping with minimal resampling artifacts
   const zoomFactor = uniform(rng, 1.01, 1.025);
   const z = zoomFactor.toFixed(4);
-  // Round dimensions to even after zoom crop to prevent odd intermediate sizes
-  return `scale=iw*${z}:ih*${z}:flags=lanczos,crop=iw/${z}:ih/${z},crop=trunc(iw/2)*2:trunc(ih/2)*2`;
+  // Round dimensions to even + reset SAR after zoom to prevent drift
+  return `scale=iw*${z}:ih*${z}:flags=lanczos,crop=iw/${z}:ih/${z},crop=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1`;
 }
 
 // ─── Layer 11: Rotation (pHash-aware: shifts spatial content → DCT change) ───
@@ -538,7 +538,8 @@ function getRandomResolutionFilter(rng: () => number): string {
   const dh = randInt(rng, 1, 2) * 2;
   const wExpr = rng() > 0.5 ? `iw+${dw}` : `iw-${dw}`;
   const hExpr = rng() > 0.5 ? `ih+${dh}` : `ih-${dh}`;
-  return `scale=${wExpr}:${hExpr}:flags=lanczos`;
+  // Reset SAR after scale to prevent drift through subsequent filters
+  return `scale=${wExpr}:${hExpr}:flags=lanczos,setsar=1`;
 }
 
 // ─── Layer 14: Pixel shift (hue micro-rotation) ────────────────────────────
@@ -1061,7 +1062,11 @@ export function buildFfmpegCommand(
     // Use filter_complex for caption overlay
     const vfChain = videoFilters.join(",");
     let fc = `[0:v]${vfChain}[processed]`;
-    fc += `;[processed][${captionInputIdx}:v]overlay=0:0[captioned]`;
+    // Fix caption PNG colorspace: PNGs decoded as rgba/gbr cause swscaler to fail
+    // converting gbr→bt709 for overlay compositing. setparams re-tags the colorspace
+    // metadata so FFmpeg treats it as bt709 (no pixel conversion needed for RGB data).
+    fc += `;[${captionInputIdx}:v]setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709[caption]`;
+    fc += `;[processed][caption]overlay=0:0[captioned]`;
 
     if (hasAudio) {
       const afChain = audioFilters.join(",");
