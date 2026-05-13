@@ -651,7 +651,7 @@ export default function LibraryPage() {
                 </button>
               )}
               {/* Thumbnail */}
-              <Link href={selectable ? "#" : `/library/${p.id}`} className="w-10 h-10 rounded-[7px] overflow-hidden shrink-0 relative" style={{ background: gradients[i % gradients.length] }}>
+              <Link href={selectMode ? "#" : `/library/${p.id}`} className="w-10 h-10 rounded-[7px] overflow-hidden shrink-0 relative" style={{ background: gradients[i % gradients.length] }}>
                 {p.source_url && (
                   p.type === "image" ? (
                     <img src={p.source_url} alt="" className="absolute inset-0 w-full h-full object-cover" />
