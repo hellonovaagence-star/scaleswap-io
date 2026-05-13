@@ -158,23 +158,18 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Process this batch of variants — collect results, upload in parallel after
+    // Process variants — upload each one as soon as it's generated
     let completedCount = 0;
-    console.log(`[generate] Starting generation: isImage=${isImage}, batchCount=${batchCount}, startIndex=${startIndex}, source=${sourcePath}`);
-
-    // Collect all variant results first, then upload in parallel
-    const allResults = await generateAllVariants(sourcePath, tmpDir, batchCount, gpsCity, captions, undefined, startIndex, isImage, mirrorEnabled);
-
-    // Upload all results in parallel (non-blocking between variants)
     const variantExt = isImage ? ".jpg" : ".mp4";
     const variantContentType = isImage ? "image/jpeg" : "video/mp4";
+    console.log(`[generate] Starting generation: isImage=${isImage}, batchCount=${batchCount}, startIndex=${startIndex}, source=${sourcePath}`);
 
-    await Promise.all(allResults.map(async (result) => {
+    const allResults = await generateAllVariants(sourcePath, tmpDir, batchCount, gpsCity, captions, async (_completed, _total, result) => {
       const i = result.variantIndex;
-
       console.log(`[generate] Variant ${i}: success=${result.success}, outputPath=${result.outputPath?.slice(-30)}, error=${result.error}`);
+
       if (result.success && result.outputPath) {
-        // Upload variant file
+        // Upload variant file immediately
         const fileData = await fs.readFile(result.outputPath);
         const storagePath = `${user.id}/${projectId}/variant_${String(i).padStart(3, "0")}${variantExt}`;
 
@@ -186,7 +181,6 @@ export async function POST(req: NextRequest) {
             upsert: true,
           });
 
-        // Clean up variant file immediately
         await fs.unlink(result.outputPath).catch(() => {});
 
         if (uploadError) {
@@ -231,7 +225,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Single DB update with all variant data
+        // Update DB immediately so frontend sees the variant
         const updateData: Record<string, unknown> = {
           status: "valid",
           output_url: urlData.publicUrl,
@@ -252,7 +246,6 @@ export async function POST(req: NextRequest) {
 
         completedCount++;
       } else {
-        console.error(`FFmpeg failed for variant ${i}:`, result.error);
         console.error(`[generate] FFmpeg error variant ${i}:`, result.error);
         await supabase
           .from("variants")
@@ -260,7 +253,7 @@ export async function POST(req: NextRequest) {
           .eq("project_id", projectId)
           .eq("variant_index", i);
       }
-    }));
+    }, startIndex, isImage, mirrorEnabled);
 
     // Update project status when this is the last batch (or the only batch)
     if (remaining === 0) {
