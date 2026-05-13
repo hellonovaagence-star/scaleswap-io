@@ -1264,7 +1264,10 @@ export async function generateVariant(
 
     return { variantIndex, outputPath, success: true, hash, phash, phashDistance, thumbnailPath, error: null };
   } catch (err: unknown) {
+    const stderr = (err as { stderr?: string }).stderr || "";
     const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[variant ${variantIndex}] FAILED: ${msg}`);
+    if (stderr) console.error(`[variant ${variantIndex}] FFmpeg stderr: ${stderr.slice(-500)}`);
     return { variantIndex, outputPath: "", success: false, hash: null, phash: null, phashDistance: null, thumbnailPath: null, error: msg };
   } finally {
     // Only clean up caption PNGs we generated ourselves (not pre-generated shared ones)
@@ -1348,8 +1351,8 @@ export async function generateAllVariants(
   }
 
   // Parallel execution — run multiple FFmpeg processes concurrently
-  // Use half of CPU cores (FFmpeg itself is multi-threaded) with min 2, max 10
-  const concurrency = Math.max(2, Math.min(10, Math.floor(os.cpus().length / 2)));
+  // Conservative: 1 per 4 cores (FFmpeg + filters are very memory-hungry)
+  const concurrency = Math.max(1, Math.min(3, Math.floor(os.cpus().length / 4)));
   const results: VariantResult[] = [];
   let completed = 0;
 

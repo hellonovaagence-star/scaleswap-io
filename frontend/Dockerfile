@@ -11,6 +11,12 @@ COPY . .
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 
+# Fail fast if Supabase env vars are missing (NEXT_PUBLIC_* must be inlined at build time)
+RUN test -n "$NEXT_PUBLIC_SUPABASE_URL" \
+    || (echo "❌ NEXT_PUBLIC_SUPABASE_URL is not set — add it as a build-time variable" && exit 1)
+RUN test -n "$NEXT_PUBLIC_SUPABASE_ANON_KEY" \
+    || (echo "❌ NEXT_PUBLIC_SUPABASE_ANON_KEY is not set — add it as a build-time variable" && exit 1)
+
 # Write .env.production so Next.js always picks up the vars at build time
 RUN printf "NEXT_PUBLIC_SUPABASE_URL=%s\nNEXT_PUBLIC_SUPABASE_ANON_KEY=%s\n" \
     "$NEXT_PUBLIC_SUPABASE_URL" "$NEXT_PUBLIC_SUPABASE_ANON_KEY" > .env.production
