@@ -22,6 +22,7 @@ export default function CaptionsPage() {
   const [editingGroup, setEditingGroup] = useState<CaptionGroup | null>(null);
   const [showGroupEditor, setShowGroupEditor] = useState(false);
   const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
   const supabase = createClient();
   const { user } = useUser();
@@ -89,11 +90,11 @@ export default function CaptionsPage() {
         text: data.text,
         position: data.position,
         font_size: data.font_size,
+        text_scale: data.text_scale,
         font_color: data.font_color,
         stroke_color: data.stroke_color,
         font_family: data.font_family,
       };
-      console.log("[caption update] id:", captionId, "payload:", updatePayload);
       const { data: updated, error: updateError } = await supabase
         .from("captions")
         .update(updatePayload)
@@ -101,18 +102,21 @@ export default function CaptionsPage() {
         .select()
         .single();
       if (updateError || !updated) {
-        console.error("[caption update] failed:", updateError);
+        alert(`Save failed: ${updateError?.message || "No row returned"}`);
         return;
       }
-      // Optimistic: update local state immediately so UI reflects changes
-      setCaptions((prev) => prev.map((c) => c.id === captionId ? { ...c, ...updatePayload } : c));
+      setCaptions((prev) => prev.map((c) => c.id === captionId ? { ...c, ...updated } : c));
     } else {
-      const { data: newCaption } = await supabase
+      const { data: newCaption, error: insertError } = await supabase
         .from("captions")
         .insert({ ...data, user_id: authUser.id })
         .select()
         .single();
-      if (!newCaption) return;
+      if (insertError || !newCaption) {
+        console.error("[caption insert] failed:", insertError);
+        alert(`Save failed: ${insertError?.message || "Unknown error"}`);
+        return;
+      }
       captionId = newCaption.id;
     }
 
@@ -233,31 +237,141 @@ export default function CaptionsPage() {
             className="bg-transparent border-none outline-none text-[13px] flex-1 min-w-0"
           />
         </label>
+
+        {tab === "captions" && (
+          <div className="flex items-center rounded-lg border p-0.5" style={{
+            background: "var(--color-surface)",
+            borderColor: "var(--color-border)",
+            boxShadow: "0 1px 2px rgba(11,11,10,0.04)",
+          }}>
+            <button
+              onClick={() => setViewMode("grid")}
+              className="w-[30px] h-[30px] rounded-[5px] flex items-center justify-center transition-all"
+              style={{
+                background: viewMode === "grid" ? "var(--color-surface-2)" : "transparent",
+                color: viewMode === "grid" ? "var(--color-ink)" : "var(--color-muted)",
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            </button>
+            <button
+              onClick={() => setViewMode("list")}
+              className="w-[30px] h-[30px] rounded-[5px] flex items-center justify-center transition-all"
+              style={{
+                background: viewMode === "list" ? "var(--color-surface-2)" : "transparent",
+                color: viewMode === "list" ? "var(--color-ink)" : "var(--color-muted)",
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Content */}
       {tab === "captions" ? (
-        <div key="captions" className="grid gap-3.5 animate-page-fade" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
-          {filteredCaptions.map((c) => (
-            <CaptionCard
-              key={c.id}
-              caption={c}
-              groupNames={getGroupsForCaption(c.id).map((g) => g.name)}
-              onEdit={(cap) => { setEditingCaption(cap); setShowCaptionEditor(true); }}
-              onDelete={handleDeleteCaption}
-            />
-          ))}
-          {filteredCaptions.length === 0 && (
-            <div className="col-span-full text-center py-12">
-              <p className="text-[14px]" style={{ color: "var(--color-muted)" }}>No captions found</p>
-              <button
-                onClick={() => { setEditingCaption(null); setShowCaptionEditor(true); }}
-                className="text-[13px] font-medium mt-2"
-                style={{ color: "var(--color-accent)" }}
-              >Create your first caption</button>
+        viewMode === "grid" ? (
+          <div key="captions-grid" className="grid gap-3.5 animate-page-fade" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
+            {filteredCaptions.map((c) => (
+              <CaptionCard
+                key={c.id}
+                caption={c}
+                groupNames={getGroupsForCaption(c.id).map((g) => g.name)}
+                onEdit={(cap) => { setEditingCaption(cap); setShowCaptionEditor(true); }}
+                onDelete={handleDeleteCaption}
+              />
+            ))}
+            {filteredCaptions.length === 0 && (
+              <div className="col-span-full text-center py-12">
+                <p className="text-[14px]" style={{ color: "var(--color-muted)" }}>No captions found</p>
+                <button
+                  onClick={() => { setEditingCaption(null); setShowCaptionEditor(true); }}
+                  className="text-[13px] font-medium mt-2"
+                  style={{ color: "var(--color-accent)" }}
+                >Create your first caption</button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div key="captions-list" className="flex flex-col gap-1.5 animate-page-fade">
+            {/* List header */}
+            <div className="flex items-center gap-3 px-4 py-2 text-[11px] font-medium uppercase tracking-wider" style={{ color: "var(--color-muted-2)", letterSpacing: "0.04em" }}>
+              <span className="flex-1 min-w-0">Caption</span>
+              <span className="w-[70px] text-center">Position</span>
+              <span className="w-[70px] text-center">Style</span>
+              <span className="w-[60px] text-center">Size</span>
+              <span className="w-[100px]">Groups</span>
+              <span className="w-[70px] text-right">Date</span>
+              <span className="w-7" />
             </div>
-          )}
-        </div>
+            {filteredCaptions.map((c) => {
+              const posLabel = c.position === "top" ? "Top" : c.position === "center" ? "Center" : c.position === "bottom" ? "Bottom" : c.position.includes(",") ? (parseFloat(c.position) < 25 ? "Top" : parseFloat(c.position) > 75 ? "Bottom" : "Center") : "Custom";
+              const captionGroups = getGroupsForCaption(c.id);
+              return (
+                <div
+                  key={c.id}
+                  className="flex items-center gap-3 px-4 py-3 rounded-[10px] border cursor-pointer transition-all duration-150 hover:-translate-y-0.5 hover:shadow-sm group"
+                  style={{
+                    background: "var(--color-surface)",
+                    borderColor: "var(--color-border-soft)",
+                  }}
+                  onClick={() => { setEditingCaption(c); setShowCaptionEditor(true); }}
+                >
+                  {/* Text */}
+                  <p className="flex-1 min-w-0 text-[13px] leading-snug truncate" style={{ color: "var(--color-ink-2)" }}>
+                    {c.text}
+                  </p>
+                  {/* Position */}
+                  <span className="w-[70px] text-center text-[10.5px] font-medium px-[7px] py-[3px] rounded-full shrink-0" style={{
+                    background: "var(--color-accent-soft)",
+                    color: "var(--color-accent-hover)",
+                  }}>
+                    {posLabel}
+                  </span>
+                  {/* Style */}
+                  <span className="w-[70px] text-center text-[10.5px] font-medium px-[7px] py-[3px] rounded-full shrink-0" style={{
+                    background: "var(--color-surface-2)",
+                    color: "var(--color-muted)",
+                  }}>
+                    {c.font_family === "instagram" ? "Instagram" : "TikTok"}
+                  </span>
+                  {/* Size + colors */}
+                  <span className="w-[60px] flex items-center justify-center gap-1.5 text-[11px] shrink-0" style={{ color: "var(--color-muted-2)" }}>
+                    <span className="w-2.5 h-2.5 rounded-sm border" style={{ background: c.font_color, borderColor: "var(--color-border-soft)" }} />
+                    {c.font_size}px
+                  </span>
+                  {/* Groups */}
+                  <span className="w-[100px] truncate text-[11px] shrink-0" style={{ color: "var(--color-muted)" }}>
+                    {captionGroups.length > 0 ? captionGroups.map((g) => g.name).join(", ") : "—"}
+                  </span>
+                  {/* Date */}
+                  <span className="w-[70px] text-right text-[11px] shrink-0" style={{ color: "var(--color-muted-2)" }}>
+                    {new Date(c.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </span>
+                  {/* Edit icon */}
+                  <svg
+                    width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+                    className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ color: "var(--color-accent)" }}
+                  >
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                  </svg>
+                </div>
+              );
+            })}
+            {filteredCaptions.length === 0 && (
+              <div className="text-center py-12">
+                <p className="text-[14px]" style={{ color: "var(--color-muted)" }}>No captions found</p>
+                <button
+                  onClick={() => { setEditingCaption(null); setShowCaptionEditor(true); }}
+                  className="text-[13px] font-medium mt-2"
+                  style={{ color: "var(--color-accent)" }}
+                >Create your first caption</button>
+              </div>
+            )}
+          </div>
+        )
       ) : (
         <div key="groups" className="grid gap-3.5 animate-page-fade" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
           {filteredGroups.map((g) => (
@@ -267,6 +381,7 @@ export default function CaptionsPage() {
               captions={captions}
               onEdit={(grp) => { setEditingGroup(grp); setShowGroupEditor(true); }}
               onDelete={handleDeleteGroup}
+              onEditCaption={(cap) => { setEditingCaption(cap); setShowCaptionEditor(true); }}
             />
           ))}
           {filteredGroups.length === 0 && (

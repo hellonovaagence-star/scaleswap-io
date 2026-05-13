@@ -31,12 +31,13 @@ export default function SettingsPage() {
     if (!user) return;
     setSaving(true);
     const supabase = createClient();
-    await supabase
-      .from("profiles")
-      .update({ display_name: displayName.trim() })
-      .eq("id", user.id);
+    await Promise.all([
+      supabase.from("profiles").update({ display_name: displayName.trim() }).eq("id", user.id),
+      supabase.auth.updateUser({ data: { display_name: displayName.trim() } }),
+    ]);
     setSaving(false);
     setSaved(true);
+    window.dispatchEvent(new Event("profile-updated"));
     setTimeout(() => setSaved(false), 2000);
   };
 

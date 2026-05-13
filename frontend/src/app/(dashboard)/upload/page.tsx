@@ -169,19 +169,9 @@ export default function UploadPage() {
       throw new Error(`Upload failed: ${uploadError.message}`);
     }
 
-    // 3. Get public URL
+    // 3-6. Run remaining setup in parallel (all independent after upload)
     const { data: urlData } = supabase.storage.from("videos").getPublicUrl(storagePath);
-    await supabase.from("projects").update({ source_url: urlData.publicUrl }).eq("id", project.id);
 
-    // 4. Add to group
-    if (selectedGroupId) {
-      await supabase.from("project_group_members").insert({
-        project_id: project.id,
-        group_id: selectedGroupId,
-      });
-    }
-
-    // 5. Create variant records
     const variantRows = Array.from({ length: variantCount }, (_, i) => ({
       project_id: project.id,
       user_id: authUser.id,
@@ -190,11 +180,16 @@ export default function UploadPage() {
       output_url: null,
     }));
 
-    const { error: variantError } = await supabase.from("variants").insert(variantRows);
-    if (variantError) throw new Error(`Variants creation failed: ${variantError.message}`);
-
-    // 6. Update status
-    await supabase.from("projects").update({ status: "processing" }).eq("id", project.id);
+    const parallelOps = [
+      supabase.from("projects").update({ source_url: urlData.publicUrl, status: "processing" }).eq("id", project.id).then(),
+      supabase.from("variants").insert(variantRows).then(),
+    ];
+    if (selectedGroupId) {
+      parallelOps.push(
+        supabase.from("project_group_members").insert({ project_id: project.id, group_id: selectedGroupId }).then()
+      );
+    }
+    await Promise.all(parallelOps);
 
     return {
       projectId: project.id,
@@ -245,30 +240,42 @@ export default function UploadPage() {
       return;
     }
 
-    // Bulk — create all projects, then queue
+    // Bulk — create all projects in parallel (5 concurrent uploads), then queue
     const batchId = crypto.randomUUID();
-    for (const bulkFile of files) {
-      try {
-        const result = await createAndTriggerProject(bulkFile, authUser, batchId);
+    const UPLOAD_CONCURRENCY = 5;
 
-        bulkQueue.addToQueue({
-          projectId: result.projectId,
-          title: bulkFile.title,
-          sourceUrl: result.sourceUrl,
-          generatePayload: {
+    for (let i = 0; i < files.length; i += UPLOAD_CONCURRENCY) {
+      const batch = files.slice(i, i + UPLOAD_CONCURRENCY);
+      const results = await Promise.allSettled(
+        batch.map(async (bulkFile) => {
+          const result = await createAndTriggerProject(bulkFile, authUser, batchId);
+          return { bulkFile, result };
+        })
+      );
+
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          const { bulkFile, result } = r.value;
+          bulkQueue.addToQueue({
             projectId: result.projectId,
+            title: bulkFile.title,
             sourceUrl: result.sourceUrl,
-            variantCount,
-            userId: authUser.id,
-            gpsCity: gpsCity || undefined,
-            captionId: captionMode === "single" && selectedCaptionId ? selectedCaptionId : undefined,
-            captionGroupId: captionMode === "group" && selectedCaptionGroupId ? selectedCaptionGroupId : undefined,
-            projectType: result.projectType,
-            mirrorEnabled,
-          },
-        });
-      } catch (err) {
-        setError(`Error for "${bulkFile.title}": ${err instanceof Error ? err.message : "Unknown error"}`);
+            generatePayload: {
+              projectId: result.projectId,
+              sourceUrl: result.sourceUrl,
+              variantCount,
+              userId: authUser.id,
+              gpsCity: gpsCity || undefined,
+              captionId: captionMode === "single" && selectedCaptionId ? selectedCaptionId : undefined,
+              captionGroupId: captionMode === "group" && selectedCaptionGroupId ? selectedCaptionGroupId : undefined,
+              projectType: result.projectType,
+              mirrorEnabled,
+            },
+          });
+        } else {
+          const failedFile = batch[results.indexOf(r)];
+          setError(`Error for "${failedFile?.title}": ${r.reason?.message || "Unknown error"}`);
+        }
       }
     }
 

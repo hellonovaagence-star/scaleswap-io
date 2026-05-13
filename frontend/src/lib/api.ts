@@ -116,6 +116,7 @@ export interface Caption {
   text: string;
   position: string;
   font_size: number;
+  text_scale: number;
   font_color: string;
   stroke_color: string;
   font_family: string;

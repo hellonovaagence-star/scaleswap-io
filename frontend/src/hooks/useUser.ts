@@ -24,7 +24,18 @@ export function useUser() {
       setUser(session?.user ?? null);
     });
 
-    return () => subscription.unsubscribe();
+    // Re-fetch user when profile is updated from another component
+    const handleProfileUpdate = () => {
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        if (user) setUser(user);
+      });
+    };
+    window.addEventListener("profile-updated", handleProfileUpdate);
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener("profile-updated", handleProfileUpdate);
+    };
   }, []);
 
   const signOut = async () => {

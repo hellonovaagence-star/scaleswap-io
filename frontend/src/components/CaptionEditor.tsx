@@ -23,7 +23,6 @@ const SNAP_POINTS = [
 ];
 const SNAP_THRESHOLD = 3;
 
-// Parse position string: "Y,X" exact coords, or legacy "top"/"center"/"bottom"
 function parsePosition(pos?: string): { y: number; x: number } {
   if (!pos) return { y: PRESET_Y.bottom, x: 50 };
   if (pos.includes(",")) {
@@ -45,6 +44,7 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
   const [customY, setCustomY] = useState<number>(initPos.y);
   const [customX, setCustomX] = useState<number>(initPos.x);
   const [fontSize, setFontSize] = useState(caption?.font_size ?? 24);
+  const [textScale, setTextScale] = useState(caption?.text_scale ?? 1);
   const [fontColor, setFontColor] = useState(caption?.font_color ?? "#FFFFFF");
   const [strokeColor, setStrokeColor] = useState(caption?.stroke_color ?? "#000000");
   const [strokeEnabled, setStrokeEnabled] = useState(caption?.stroke_color !== "transparent");
@@ -53,11 +53,10 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
   const [newGroupName, setNewGroupName] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
-  const [resizeStartY, setResizeStartY] = useState(0);
-  const [resizeStartScale, setResizeStartScale] = useState(1);
-  const [textScale, setTextScale] = useState(1);
   const [showGuides, setShowGuides] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
+  const resizeStartYRef = useRef(0);
+  const resizeStartScaleRef = useRef(1);
 
   const handleCreateGroup = async () => {
     if (!newGroupName.trim()) return;
@@ -81,7 +80,7 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
   const snapX = (raw: number) => Math.abs(raw - 50) < SNAP_THRESHOLD ? 50 : raw;
   const isXCentered = Math.abs(customX - 50) < 1.5;
 
-  // Drag handlers — only for moving position, never changes size
+  // Drag handlers — moving position only
   const calcPos = useCallback((clientX: number, clientY: number) => {
     if (!previewRef.current) return null;
     const rect = previewRef.current.getBoundingClientRect();
@@ -94,7 +93,7 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
   }, []);
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (isResizing) return; // don't start drag while resizing
+    if (isResizing) return;
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     setIsDragging(true);
@@ -120,20 +119,20 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
     setTimeout(() => setShowGuides(false), 400);
   };
 
-  // Resize handlers — only for scaling, separate from drag
+  // Resize handlers — zoom in/out (scales the whole text block, keeps layout)
   const handleResizeDown = (e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     setIsResizing(true);
-    setResizeStartY(e.clientY);
-    setResizeStartScale(textScale);
+    resizeStartYRef.current = e.clientY;
+    resizeStartScaleRef.current = textScale;
   };
 
   const handleResizeMove = (e: React.PointerEvent) => {
     if (!isResizing) return;
-    const deltaY = resizeStartY - e.clientY;
-    const newScale = Math.max(0.3, Math.min(3, resizeStartScale + deltaY * 0.008));
+    const deltaY = resizeStartYRef.current - e.clientY;
+    const newScale = Math.max(0.3, Math.min(3, resizeStartScaleRef.current + deltaY * 0.008));
     setTextScale(Math.round(newScale * 100) / 100);
   };
 
@@ -141,18 +140,15 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
     setIsResizing(false);
   };
 
-  // Save exact Y,X coordinates as string
+  // Always save freeform "Y,X" coordinates
   const getPosition = (): string => `${Math.round(customY * 10) / 10},${Math.round(customX * 10) / 10}`;
 
-  // Active preset check
   const isPresetActive = (pos: "top" | "center" | "bottom") =>
     Math.abs(customY - PRESET_Y[pos]) < SNAP_THRESHOLD;
 
   const effectiveFontSize = Math.round(fontSize * textScale);
-  const previewFontSize = Math.max(8, effectiveFontSize * 0.35);
+  const previewFontSize = Math.max(8, fontSize * 0.35);
   const previewStrokeWidth = Math.max(0.5, previewFontSize * 0.16);
-
-  // Which snap point is currently snapped
   const snappedPoint = SNAP_POINTS.find((s) => Math.abs(customY - s.y) < 1.5);
 
   return createPortal(
@@ -190,7 +186,7 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
                 />
               </div>
 
-              {/* Group selector — multi-select chips */}
+              {/* Group selector */}
               <div>
                 <label className="text-xs font-medium mb-1.5 block" style={{ color: "var(--color-ink-2)" }}>Groups</label>
                 <div className="flex flex-wrap gap-1.5">
@@ -207,24 +203,16 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
                           color: selected ? "var(--color-accent-hover)" : "var(--color-ink-2)",
                         }}
                       >
-                        {selected && (
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-                        )}
+                        {selected && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>}
                         {g.name}
-                        {selected && (
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ marginLeft: 2 }}><path d="M18 6L6 18M6 6l12 12"/></svg>
-                        )}
+                        {selected && <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ marginLeft: 2 }}><path d="M18 6L6 18M6 6l12 12"/></svg>}
                       </button>
                     );
                   })}
                   <button
                     onClick={() => setCreatingGroup(true)}
                     className="inline-flex items-center gap-1 text-[12px] font-medium px-2.5 py-[5px] rounded-full border transition-all"
-                    style={{
-                      background: "var(--color-surface)",
-                      borderColor: "var(--color-border-soft)",
-                      color: "var(--color-muted)",
-                    }}
+                    style={{ background: "var(--color-surface)", borderColor: "var(--color-border-soft)", color: "var(--color-muted)" }}
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
                     New
@@ -233,20 +221,14 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
                 {creatingGroup && (
                   <div className="flex gap-2 mt-2">
                     <input
-                      type="text"
-                      value={newGroupName}
-                      onChange={(e) => setNewGroupName(e.target.value)}
+                      type="text" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)}
                       placeholder="Group name..."
                       className="flex-1 px-3 py-2 rounded-[9px] border text-[13px] outline-none focus:border-[var(--color-accent)]"
                       style={{ background: "var(--color-surface-2)", borderColor: "var(--color-border)" }}
                       autoFocus
                       onKeyDown={(e) => { if (e.key === "Enter") handleCreateGroup(); if (e.key === "Escape") { setCreatingGroup(false); setNewGroupName(""); } }}
                     />
-                    <button
-                      onClick={handleCreateGroup}
-                      className="text-[12px] font-medium px-3 py-2 rounded-lg text-white"
-                      style={{ background: "var(--color-accent)" }}
-                    >Create</button>
+                    <button onClick={handleCreateGroup} className="text-[12px] font-medium px-3 py-2 rounded-lg text-white" style={{ background: "var(--color-accent)" }}>Create</button>
                   </div>
                 )}
               </div>
@@ -272,10 +254,7 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
               <div>
                 <label className="text-xs font-medium mb-1.5 block" style={{ color: "var(--color-ink-2)" }}>Font</label>
                 <div className="flex gap-1.5">
-                  {([
-                    { key: "tiktok" as const, label: "TikTok" },
-                    { key: "instagram" as const, label: "Instagram" },
-                  ]).map(({ key, label }) => (
+                  {([{ key: "tiktok" as const, label: "TikTok" }, { key: "instagram" as const, label: "Instagram" }]).map(({ key, label }) => (
                     <button
                       key={key}
                       onClick={() => setCaptionFont(key)}
@@ -294,15 +273,12 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
                 <div className="flex justify-between items-center text-xs font-medium mb-2.5" style={{ color: "var(--color-ink-2)" }}>
                   <span>Font size</span>
                   <span style={{ fontFamily: "'JetBrains Mono', monospace", color: "var(--color-accent-hover)" }}>
-                    {effectiveFontSize}px
+                    {fontSize}px{textScale !== 1 ? ` × ${Math.round(textScale * 100)}%` : ""}<span style={{ color: "var(--color-muted)", marginLeft: 4 }}>{textScale !== 1 ? `= ${effectiveFontSize}px` : ""}</span>
                   </span>
                 </div>
                 <input
-                  type="range"
-                  min="12"
-                  max="72"
-                  value={fontSize}
-                  onChange={(e) => { setFontSize(Number(e.target.value)); setTextScale(1); }}
+                  type="range" min="12" max="72" value={fontSize}
+                  onChange={(e) => setFontSize(Number(e.target.value))}
                   className="w-full h-1 rounded-full appearance-none"
                   style={{ background: "var(--color-surface-2)", accentColor: "var(--color-accent)" }}
                 />
@@ -339,11 +315,10 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
                 )}
               </div>
 
-              {/* Spacer for breathing room */}
               <div className="h-1" />
             </div>
 
-            {/* Live preview — draggable */}
+            {/* Live preview */}
             <div>
               <label className="text-xs font-medium mb-1.5 block" style={{ color: "var(--color-ink-2)" }}>
                 Preview
@@ -366,114 +341,65 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
                 {(isDragging || showGuides) && SNAP_POINTS.map((snap) => {
                   const isSnapped = Math.abs(customY - snap.y) < 1.5;
                   return (
-                    <div
-                      key={snap.y}
-                      className="absolute left-0 right-0 pointer-events-none transition-all duration-150"
-                      style={{
-                        top: `${snap.y}%`,
-                        height: isSnapped ? 1.5 : 0.5,
-                        background: isSnapped
-                          ? "rgba(139,127,255,0.9)"
-                          : "rgba(255,255,255,0.12)",
-                        boxShadow: isSnapped ? "0 0 6px rgba(139,127,255,0.5)" : "none",
-                      }}
-                    >
-                      {/* Label */}
-                      <span
-                        className="absolute right-1 pointer-events-none transition-opacity duration-150"
-                        style={{
-                          top: -12,
-                          fontSize: 7,
-                          fontWeight: 600,
-                          letterSpacing: "0.02em",
-                          color: isSnapped ? "rgba(139,127,255,0.95)" : "rgba(255,255,255,0.25)",
-                          opacity: isSnapped ? 1 : (isDragging ? 0.6 : 0),
-                        }}
-                      >
-                        {snap.label}
-                      </span>
+                    <div key={snap.y} className="absolute left-0 right-0 pointer-events-none transition-all duration-150" style={{
+                      top: `${snap.y}%`, height: isSnapped ? 1.5 : 0.5,
+                      background: isSnapped ? "rgba(139,127,255,0.9)" : "rgba(255,255,255,0.12)",
+                      boxShadow: isSnapped ? "0 0 6px rgba(139,127,255,0.5)" : "none",
+                    }}>
+                      <span className="absolute right-1 pointer-events-none transition-opacity duration-150" style={{
+                        top: -12, fontSize: 7, fontWeight: 600, letterSpacing: "0.02em",
+                        color: isSnapped ? "rgba(139,127,255,0.95)" : "rgba(255,255,255,0.25)",
+                        opacity: isSnapped ? 1 : (isDragging ? 0.6 : 0),
+                      }}>{snap.label}</span>
                     </div>
                   );
                 })}
 
                 {/* Vertical center guide */}
                 {(isDragging || showGuides) && (
-                  <div
-                    className="absolute top-0 bottom-0 left-1/2 pointer-events-none transition-all duration-150"
-                    style={{
-                      width: isXCentered ? 1.5 : 0.5,
-                      background: isXCentered
-                        ? "rgba(139,127,255,0.9)"
-                        : "rgba(255,255,255,0.12)",
-                      boxShadow: isXCentered ? "0 0 6px rgba(139,127,255,0.5)" : "none",
-                      transform: "translateX(-50%)",
-                    }}
-                  />
+                  <div className="absolute top-0 bottom-0 left-1/2 pointer-events-none transition-all duration-150" style={{
+                    width: isXCentered ? 1.5 : 0.5,
+                    background: isXCentered ? "rgba(139,127,255,0.9)" : "rgba(255,255,255,0.12)",
+                    boxShadow: isXCentered ? "0 0 6px rgba(139,127,255,0.5)" : "none",
+                    transform: "translateX(-50%)",
+                  }} />
                 )}
 
-                {/* Caption text — fixed width container prevents reflow near edges */}
+                {/* Caption text */}
                 {text && (
-                  <div
-                    className="absolute pointer-events-none"
-                    style={{
-                      top: `${customY}%`,
-                      left: "50%",
-                      width: 170,
-                      textAlign: "center",
-                      transform: `translate(-50%, -50%) translateX(${((customX - 50) / 100) * (previewRef.current?.offsetWidth ?? 200)}px)`,
-                      transition: isDragging || isResizing ? "none" : "top 150ms, transform 150ms",
-                    }}
-                  >
-                    {/* Bounding box — inline-block to hug text tightly */}
-                    <div
-                      className="relative inline-block"
-                      style={{
-                        border: "1px dashed rgba(139,127,255,0.45)",
-                        borderRadius: 3,
-                        padding: "3px 8px",
-                        transform: `scale(${textScale})`,
-                        transformOrigin: "center center",
-                        transition: isResizing ? "none" : "transform 150ms",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: `${Math.max(8, fontSize * 0.35)}px`,
-                          fontFamily: captionFont === "tiktok"
-                            ? "'TikTok Sans', system-ui, sans-serif"
-                            : "'Helvetica Neue', 'Arial', system-ui, sans-serif",
-                          fontWeight: 700,
-                          color: fontColor,
-                          WebkitTextStroke: strokeEnabled ? `${previewStrokeWidth}px ${strokeColor}` : undefined,
-                          paintOrder: "stroke fill" as const,
-                          textShadow: strokeEnabled ? `0 ${Math.round(previewFontSize * 0.03)}px ${Math.round(previewFontSize * 0.05)}px rgba(0,0,0,0.35)` : undefined,
-                          lineHeight: 1.25,
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                        }}
-                      >
+                  <div className="absolute pointer-events-none" style={{
+                    top: `${customY}%`, left: "50%", width: 170, textAlign: "center",
+                    transform: `translate(-50%, -50%) translateX(${((customX - 50) / 100) * (previewRef.current?.offsetWidth ?? 200)}px)`,
+                    transition: isDragging || isResizing ? "none" : "top 150ms, transform 150ms",
+                  }}>
+                    <div className="relative inline-block" style={{
+                      border: "1px dashed rgba(139,127,255,0.45)", borderRadius: 3, padding: "3px 8px",
+                      transform: `scale(${textScale})`, transformOrigin: "center center",
+                      transition: isResizing ? "none" : "transform 150ms",
+                    }}>
+                      <div style={{
+                        fontSize: `${previewFontSize}px`,
+                        fontFamily: captionFont === "tiktok" ? "'TikTok Sans', system-ui, sans-serif" : "'Helvetica Neue', 'Arial', system-ui, sans-serif",
+                        fontWeight: 700, color: fontColor,
+                        WebkitTextStroke: strokeEnabled ? `${previewStrokeWidth}px ${strokeColor}` : undefined,
+                        paintOrder: "stroke fill" as const,
+                        textShadow: strokeEnabled ? `0 ${Math.round(previewFontSize * 0.03)}px ${Math.round(previewFontSize * 0.05)}px rgba(0,0,0,0.35)` : undefined,
+                        lineHeight: 1.25, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                      }}>
                         {text}
                       </div>
 
-                      {/* Resize handles — corners, completely separate from drag */}
+                      {/* Resize handles */}
                       {([
                         { top: -5, left: -5, cursor: "nwse-resize" },
                         { top: -5, right: -5, cursor: "nesw-resize" },
                         { bottom: -5, left: -5, cursor: "nesw-resize" },
                         { bottom: -5, right: -5, cursor: "nwse-resize" },
                       ] as const).map((pos, idx) => (
-                        <div
-                          key={idx}
-                          className="absolute pointer-events-auto"
-                          style={{
-                            ...pos,
-                            width: 9,
-                            height: 9,
-                            borderRadius: 2,
-                            background: "var(--color-accent)",
-                            border: "1.5px solid rgba(255,255,255,0.9)",
-                            cursor: pos.cursor,
-                          }}
+                        <div key={idx} className="absolute pointer-events-auto" style={{
+                          ...pos, width: 9, height: 9, borderRadius: 2,
+                          background: "var(--color-accent)", border: "1.5px solid rgba(255,255,255,0.9)", cursor: pos.cursor,
+                        }}
                           onPointerDown={handleResizeDown}
                           onPointerMove={handleResizeMove}
                           onPointerUp={handleResizeUp}
@@ -484,54 +410,42 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
                     {/* Scale indicator */}
                     {isResizing && (
                       <div className="absolute left-1/2 -translate-x-1/2 pointer-events-none" style={{
-                        bottom: -18,
-                        fontSize: 8,
-                        fontWeight: 600,
-                        color: "rgba(139,127,255,0.9)",
-                        fontFamily: "'JetBrains Mono', monospace",
-                      }}>
-                        {Math.round(textScale * 100)}%
-                      </div>
+                        bottom: -18, fontSize: 8, fontWeight: 600,
+                        color: "rgba(139,127,255,0.9)", fontFamily: "'JetBrains Mono', monospace",
+                      }}>{Math.round(textScale * 100)}%</div>
                     )}
                   </div>
                 )}
 
-                {/* Snapped label badge */}
+                {/* Snapped label */}
                 {snappedPoint && !isDragging && text && (
-                  <div
-                    className="absolute pointer-events-none"
-                    style={{
-                      top: `${customY}%`,
-                      left: `${customX}%`,
-                      transform: "translate(-50%, 10px)",
-                      fontSize: 7,
-                      fontWeight: 600,
-                      color: "rgba(139,127,255,0.7)",
-                      letterSpacing: "0.05em",
-                    }}
-                  >
-                    {snappedPoint.label}
-                  </div>
+                  <div className="absolute pointer-events-none" style={{
+                    top: `${customY}%`, left: `${customX}%`, transform: "translate(-50%, 10px)",
+                    fontSize: 7, fontWeight: 600, color: "rgba(139,127,255,0.7)", letterSpacing: "0.05em",
+                  }}>{snappedPoint.label}</div>
                 )}
               </div>
             </div>
           </div>
         </div>
 
-        {/* Fixed footer */}
+        {/* Footer */}
         <div className="flex justify-end gap-2 px-6 py-4 border-t shrink-0" style={{ borderColor: "var(--color-border-soft)" }}>
           <button onClick={onClose} className="text-[13px] font-medium px-4 py-2 rounded-lg border transition-all" style={{
-            background: "var(--color-surface)",
-            borderColor: "var(--color-border)",
-            color: "var(--color-ink-2)",
+            background: "var(--color-surface)", borderColor: "var(--color-border)", color: "var(--color-ink-2)",
           }}>Cancel</button>
           <button
-            onClick={() => onSave({ text, position: getPosition(), font_size: effectiveFontSize, font_color: fontColor, stroke_color: strokeEnabled ? strokeColor : "transparent", font_family: captionFont }, groupIds)}
+            onClick={() => onSave({
+              text,
+              position: getPosition(),
+              font_size: fontSize,
+              text_scale: textScale,
+              font_color: fontColor,
+              stroke_color: strokeEnabled ? strokeColor : "transparent",
+              font_family: captionFont,
+            }, groupIds)}
             className="text-[13px] font-medium px-4 py-2 rounded-lg text-white transition-all hover:-translate-y-px"
-            style={{
-              background: "var(--color-accent)",
-              boxShadow: "0 2px 6px rgba(139,127,255,0.3)",
-            }}
+            style={{ background: "var(--color-accent)", boxShadow: "0 2px 6px rgba(139,127,255,0.3)" }}
           >Save</button>
         </div>
       </div>

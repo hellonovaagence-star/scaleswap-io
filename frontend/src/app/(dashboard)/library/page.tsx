@@ -75,6 +75,7 @@ export default function LibraryPage() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
   const [bulkExporting, setBulkExporting] = useState(false);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [showAddToGroupModal, setShowAddToGroupModal] = useState(false);
   const [addToGroupId, setAddToGroupId] = useState("");
 
@@ -151,6 +152,15 @@ export default function LibraryPage() {
   };
 
   const handleDeleteProject = async (id: string) => {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (authUser) {
+      // Delete all files in storage for this project
+      const prefix = `${authUser.id}/${id}/`;
+      const { data: files } = await supabase.storage.from("videos").list(prefix);
+      if (files && files.length > 0) {
+        await supabase.storage.from("videos").remove(files.map((f) => `${prefix}${f.name}`));
+      }
+    }
     await supabase.from("projects").delete().eq("id", id);
     fetchData();
   };
@@ -197,6 +207,17 @@ export default function LibraryPage() {
   const handleBulkDelete = async () => {
     if (selectedProjectIds.size === 0) return;
     const ids = Array.from(selectedProjectIds);
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (authUser) {
+      // Delete all storage files for each project
+      for (const id of ids) {
+        const prefix = `${authUser.id}/${id}/`;
+        const { data: files } = await supabase.storage.from("videos").list(prefix);
+        if (files && files.length > 0) {
+          await supabase.storage.from("videos").remove(files.map((f) => `${prefix}${f.name}`));
+        }
+      }
+    }
     await supabase.from("projects").delete().in("id", ids);
     setSelectedProjectIds(new Set());
     setSelectMode(false);
@@ -424,6 +445,33 @@ export default function LibraryPage() {
             className="bg-transparent border-none outline-none text-[13px] flex-1 min-w-0"
           />
         </label>
+
+        <div className="flex items-center rounded-lg border p-0.5" style={{
+          background: "var(--color-surface)",
+          borderColor: "var(--color-border)",
+          boxShadow: "0 1px 2px rgba(11,11,10,0.04)",
+        }}>
+          <button
+            onClick={() => setViewMode("grid")}
+            className="w-[30px] h-[30px] rounded-[5px] flex items-center justify-center transition-all"
+            style={{
+              background: viewMode === "grid" ? "var(--color-surface-2)" : "transparent",
+              color: viewMode === "grid" ? "var(--color-ink)" : "var(--color-muted)",
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          </button>
+          <button
+            onClick={() => setViewMode("list")}
+            className="w-[30px] h-[30px] rounded-[5px] flex items-center justify-center transition-all"
+            style={{
+              background: viewMode === "list" ? "var(--color-surface-2)" : "transparent",
+              color: viewMode === "list" ? "var(--color-ink)" : "var(--color-muted)",
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
+        </div>
       </div>
 
       {/* Bulk actions bar */}
@@ -535,7 +583,8 @@ export default function LibraryPage() {
           )}
         </div>
       ) : (
-        /* Project grid */
+        /* Project grid / list */
+        viewMode === "grid" ? (
         <div className="grid gap-3.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
           {filteredProjects.map((p, i) => (
             <ProjectCard
@@ -565,6 +614,93 @@ export default function LibraryPage() {
             </div>
           )}
         </div>
+        ) : (
+        <div className="flex flex-col gap-1.5">
+          {/* List header */}
+          <div className="flex items-center gap-3 px-4 py-2 text-[11px] font-medium uppercase tracking-wider" style={{ color: "var(--color-muted-2)", letterSpacing: "0.04em" }}>
+            {selectMode && <span className="w-6" />}
+            <span className="w-10" />
+            <span className="flex-1 min-w-0">Name</span>
+            <span className="w-[80px] text-center">Type</span>
+            <span className="w-[90px] text-center">Variations</span>
+            <span className="w-[80px] text-right">Created</span>
+            <span className="w-7" />
+          </div>
+          {filteredProjects.map((p, i) => (
+            <div
+              key={p.id}
+              className="flex items-center gap-3 px-4 py-2.5 rounded-[10px] border transition-all duration-150 hover:-translate-y-0.5 hover:shadow-sm group"
+              style={{
+                background: selectedProjectIds.has(p.id) ? "var(--color-accent-soft)" : "var(--color-surface)",
+                borderColor: selectedProjectIds.has(p.id) ? "var(--color-accent)" : "var(--color-border-soft)",
+              }}
+            >
+              {/* Select checkbox */}
+              {selectMode && (
+                <button
+                  onClick={() => handleToggleSelect(p.id)}
+                  className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-all"
+                  style={{
+                    background: selectedProjectIds.has(p.id) ? "var(--color-accent)" : "var(--color-surface-2)",
+                    border: selectedProjectIds.has(p.id) ? "2px solid var(--color-accent)" : "2px solid var(--color-border)",
+                  }}
+                >
+                  {selectedProjectIds.has(p.id) && (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  )}
+                </button>
+              )}
+              {/* Thumbnail */}
+              <Link href={selectable ? "#" : `/library/${p.id}`} className="w-10 h-10 rounded-[7px] overflow-hidden shrink-0 relative" style={{ background: gradients[i % gradients.length] }}>
+                {p.source_url && (
+                  p.type === "image" ? (
+                    <img src={p.source_url} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                  ) : (
+                    <video src={`${p.source_url}#t=0.1`} muted playsInline preload="metadata" className="absolute inset-0 w-full h-full object-cover" />
+                  )
+                )}
+              </Link>
+              {/* Title */}
+              <Link href={selectMode ? "#" : `/library/${p.id}`} className="flex-1 min-w-0 text-[13px] font-medium truncate" style={{ color: "var(--color-ink)" }}>
+                {p.title}
+              </Link>
+              {/* Type */}
+              <span className="w-[80px] text-center text-[10.5px] font-medium px-[7px] py-[3px] rounded-full shrink-0" style={{
+                background: p.type === "image" ? "rgba(96,165,250,0.1)" : "var(--color-accent-soft)",
+                color: p.type === "image" ? "rgb(96,165,250)" : "var(--color-accent-hover)",
+              }}>
+                {p.type === "image" ? "Photo" : "Video"}
+              </span>
+              {/* Variations */}
+              <span className="w-[90px] text-center text-[12px]" style={{ color: "var(--color-muted)" }}>
+                {p.variant_count} variant{p.variant_count !== 1 ? "s" : ""}
+              </span>
+              {/* Date */}
+              <span className="w-[80px] text-right text-[11px] shrink-0" style={{ color: "var(--color-muted-2)" }}>
+                {timeAgo(p.created_at)}
+              </span>
+              {/* Arrow */}
+              <Link href={selectMode ? "#" : `/library/${p.id}`}>
+                <svg
+                  width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                  style={{ color: "var(--color-muted)" }}
+                >
+                  <polyline points="9 18 15 12 9 6"/>
+                </svg>
+              </Link>
+            </div>
+          ))}
+          {filteredProjects.length === 0 && (
+            <div className="text-center py-12">
+              <p className="text-[14px]" style={{ color: "var(--color-muted)" }}>No projects found</p>
+              <Link href="/upload" className="text-[13px] font-medium mt-2 inline-block" style={{ color: "var(--color-accent)" }}>
+                Create your first project
+              </Link>
+            </div>
+          )}
+        </div>
+        )
       )}
 
       {/* Group create/edit modal */}

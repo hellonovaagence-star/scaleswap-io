@@ -376,6 +376,66 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
     setExporting(false);
   };
 
+  // Export ALL variants from ALL batch siblings in one ZIP
+  const [batchExporting, setBatchExporting] = useState(false);
+  const handleBatchExportAll = async () => {
+    if (batchSiblings.length === 0) return;
+    setBatchExporting(true);
+
+    const zip = new JSZip();
+    let totalFiles = 0;
+
+    // Fetch variants for each sibling
+    await Promise.all(
+      batchSiblings.map(async (sibling) => {
+        const { data: sibVariants } = await supabase
+          .from("variants")
+          .select("*")
+          .eq("project_id", sibling.id)
+          .eq("status", "valid")
+          .order("variant_index");
+
+        const valid = (sibVariants ?? []).filter((v: Variant) => v.output_url);
+        if (valid.length === 0) return;
+
+        const folderName = sibling.title?.replace(/\s+/g, "_") || sibling.id;
+
+        await Promise.all(
+          valid.map(async (v: Variant) => {
+            const res = await fetch(v.output_url!);
+            const blob = await res.blob();
+            zip.file(`${folderName}/V${String(v.variant_index).padStart(2, "0")}.mp4`, blob);
+            totalFiles++;
+          })
+        );
+
+        // Auto-delete exported files from storage
+        const variantIds = valid.map((v: Variant) => v.id);
+        const storageUrls = valid.flatMap((v: Variant) => {
+          const urls = [v.output_url!];
+          if (v.thumbnail_url) urls.push(v.thumbnail_url);
+          return urls;
+        });
+        await cleanupVariants(variantIds, storageUrls);
+      })
+    );
+
+    if (totalFiles > 0) {
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `batch_${batchSiblings.length}files_${totalFiles}variants.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    setBatchExporting(false);
+    fetchData();
+  };
+
   if (!project) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -1111,6 +1171,72 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
           </div>
         </div>,
         document.body
+      )}
+      {/* Batch bottom bar */}
+      {batchSiblings.length > 1 && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 border-t" style={{
+          background: "var(--color-surface)",
+          borderColor: "var(--color-border)",
+          boxShadow: "0 -4px 20px rgba(0,0,0,0.08)",
+        }}>
+          <div className="flex items-center gap-3 px-6 py-3 max-w-[1400px] mx-auto">
+            {/* Thumbnails strip */}
+            <div className="flex items-center gap-2 flex-1 min-w-0 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+              {batchSiblings.map((s, i) => {
+                const isActive = s.id === activeId;
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => navigateToSibling(s.id)}
+                    className="shrink-0 rounded-[8px] overflow-hidden transition-all"
+                    style={{
+                      width: 40,
+                      height: 40,
+                      outline: isActive ? "2px solid var(--color-accent)" : "1px solid var(--color-border-soft)",
+                      outlineOffset: isActive ? 1 : 0,
+                      opacity: isActive ? 1 : 0.7,
+                    }}
+                  >
+                    {s.source_url ? (
+                      s.type === "image" ? (
+                        <img src={s.source_url} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <video src={`${s.source_url}#t=0.1`} muted playsInline preload="metadata" className="w-full h-full object-cover" />
+                      )
+                    ) : (
+                      <div className="w-full h-full" style={{ background: gradients[i % gradients.length] }} />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Info + Export all */}
+            <div className="flex items-center gap-3 shrink-0">
+              <span className="text-[12px] font-medium" style={{ color: "var(--color-muted)" }}>
+                {batchSiblings.length} files
+              </span>
+              <button
+                onClick={handleBatchExportAll}
+                disabled={batchExporting}
+                className="text-[13px] font-medium px-4 py-2 rounded-lg text-white transition-all disabled:opacity-40"
+                style={{
+                  background: "var(--color-accent)",
+                  boxShadow: "0 1px 2px rgba(139,127,255,0.3), inset 0 1px 0 rgba(255,255,255,0.15)",
+                }}
+              >
+                <span className="flex items-center gap-1.5">
+                  {batchExporting ? (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                  ) : (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  )}
+                  {batchExporting ? "Exporting..." : "Export all (.mp4)"}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

@@ -20,9 +20,10 @@ interface CaptionGroupCardProps {
   captions: Caption[];
   onEdit: (group: CaptionGroup) => void;
   onDelete: (id: string) => void;
+  onEditCaption?: (caption: Caption) => void;
 }
 
-export default function CaptionGroupCard({ group, captions, onEdit, onDelete }: CaptionGroupCardProps) {
+export default function CaptionGroupCard({ group, captions, onEdit, onDelete, onEditCaption }: CaptionGroupCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -146,13 +147,28 @@ export default function CaptionGroupCard({ group, captions, onEdit, onDelete }: 
           {groupCaptions.length > 0 ? (
             <div className="flex flex-col gap-2">
               {groupCaptions.map((c) => (
-                <div key={c.id} className="rounded-[10px] p-3 border" style={{
-                  background: "var(--color-surface-2)",
-                  borderColor: "var(--color-border-soft)",
-                }}>
-                  <p className="text-[13px] leading-relaxed mb-2" style={{ color: "var(--color-ink-2)" }}>
-                    {c.text}
-                  </p>
+                <div
+                  key={c.id}
+                  className="rounded-[10px] p-3 border cursor-pointer transition-all duration-150 hover:-translate-y-0.5 hover:shadow-sm group/caption"
+                  style={{
+                    background: "var(--color-surface-2)",
+                    borderColor: "var(--color-border-soft)",
+                  }}
+                  onClick={(e) => { e.stopPropagation(); onEditCaption?.(c); }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-[13px] leading-relaxed mb-2 flex-1 min-w-0" style={{ color: "var(--color-ink-2)" }}>
+                      {c.text}
+                    </p>
+                    <svg
+                      width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+                      className="shrink-0 mt-0.5 opacity-0 group-hover/caption:opacity-100 transition-opacity"
+                      style={{ color: "var(--color-accent)" }}
+                    >
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                    </svg>
+                  </div>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-medium px-[6px] py-[2px] rounded" style={{
                       background: "var(--color-accent-soft)",

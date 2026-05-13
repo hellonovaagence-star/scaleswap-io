@@ -176,7 +176,7 @@ export default function LandingPage() {
           >
             <Link href="/upload" className="inline-flex items-center gap-2 text-sm font-medium px-5 py-3 rounded-[10px] text-white transition-all duration-150 hover:-translate-y-0.5 mb-7" style={{
                 background: "var(--color-accent)",
-                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15), 0 2px 6px rgba(139,127,255,0.25)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15), -4px 4px 14px rgba(139,127,255,0.4), -8px 8px 28px rgba(139,127,255,0.18)",
               }}>
                 Get started free
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
@@ -205,98 +205,20 @@ export default function LandingPage() {
           </motion.div>
 
           {/* Dashboard Preview */}
-          <RevealSection direction={60} delay={0.1} className="mt-16 relative hidden lg:block">
-            <div className="rounded-3xl p-2 relative overflow-hidden" style={{
+          <RevealSection direction={60} delay={0.1} className="mt-12 relative hidden lg:block">
+            <div className="max-w-[960px] mx-auto rounded-2xl p-1.5 relative overflow-hidden" style={{
               background: "var(--color-surface)",
               border: "1px solid var(--color-border)",
-              boxShadow: "0 24px 60px -20px rgba(11,11,10,0.18), 0 8px 20px rgba(11,11,10,0.06)",
+              boxShadow: "0 20px 50px -16px rgba(11,11,10,0.16), 0 6px 16px rgba(11,11,10,0.05)",
             }}>
-              <div className="grid grid-cols-[220px_1fr] rounded-[18px] overflow-hidden" style={{ background: "var(--color-bg)", minHeight: 520 }}>
-                {/* Mini Sidebar */}
-                <div className="p-[18px_12px] flex flex-col gap-1" style={{
-                  background: "var(--color-surface)",
-                  borderRadius: "0 16px 16px 0",
-                  boxShadow: "4px 0 16px -2px rgba(11,11,10,0.06), 1px 0 4px rgba(11,11,10,0.03)",
-                  zIndex: 1,
-                  position: "relative",
-                }}>
-                  <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg mb-4">
-                    <div className="w-6 h-6 rounded-[6px] flex items-center justify-center text-[11px] font-semibold" style={{ background: "var(--color-accent-soft)", color: "var(--color-accent-hover)" }}>S</div>
-                    <span className="text-[13px]" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>Scaleswap</span>
-                  </div>
-                  <div className="text-[11px] font-medium uppercase tracking-wider px-2 pt-2 pb-1" style={{ color: "var(--color-muted-2)" }}>Workspace</div>
-                  {[
-                    { name: "All reels", active: true, badge: "24" },
-                    { name: "New project", active: false },
-                    { name: "Templates", active: false, badge: "8" },
-                    { name: "History", active: false },
-                  ].map((item) => (
-                    <div key={item.name} className={`flex items-center gap-2.5 px-2 py-[7px] rounded-[7px] text-[13.5px]`}
-                      style={{
-                        background: item.active ? "var(--color-surface-2)" : undefined,
-                        color: item.active ? "var(--color-ink)" : "var(--color-ink-2)",
-                        fontWeight: item.active ? 500 : 450,
-                      }}
-                    >
-                      <span className="w-4 h-4 rounded" style={{ background: item.active ? "var(--color-accent-soft)" : "var(--color-surface-2)" }} />
-                      {item.name}
-                      {item.badge && (
-                        <span className="ml-auto text-[11px] font-medium px-1.5 rounded" style={{
-                          background: "var(--color-accent-soft)",
-                          color: "var(--color-accent-hover)",
-                        }}>{item.badge}</span>
-                      )}
-                    </div>
-                  ))}
-                  <div className="mt-auto pt-2.5 px-2 flex items-center gap-2.5" style={{ borderTop: "1px solid var(--color-border-soft)" }}>
-                    <div className="w-[26px] h-[26px] rounded-full flex items-center justify-center text-[11px] font-semibold text-white" style={{ background: "linear-gradient(135deg, #FFB99A, #FF7E5F)" }}>KG</div>
-                    <div>
-                      <div className="text-[13px] font-medium leading-tight">Kylian G.</div>
-                      <div className="text-[11.5px] leading-tight" style={{ color: "var(--color-muted)" }}>Plan Pro</div>
-                    </div>
-                  </div>
-                </div>
-                {/* Mini Main */}
-                <div className="p-[24px_28px] overflow-hidden">
-                  <div className="flex items-start justify-between mb-6">
-                    <div>
-                      <h3 className="text-[19px] font-semibold tracking-tight mb-1">All reels</h3>
-                      <p className="text-[13px]" style={{ color: "var(--color-muted)" }}>24 projects · 247 variations this month</p>
-                    </div>
-                    <div className="flex gap-1.5">
-                      <span className="px-2.5 py-1.5 rounded-lg text-xs" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}>Export</span>
-                      <span className="px-2.5 py-1.5 rounded-lg text-xs text-white" style={{ background: "var(--color-accent)" }}>+ New</span>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-4 gap-2.5 mb-6">
-                    {[
-                      { label: "Active projects", value: "24", delta: "↑ 3 this week" },
-                      { label: "Variations", value: "247 / 500", delta: "↑ 18% vs last month" },
-                      { label: "Storage", value: "4.2 GB", delta: "8.4% used" },
-                      { label: "Time saved", value: "38h", delta: "~ 1h30/project" },
-                    ].map((s) => (
-                      <div key={s.label} className="p-3 rounded-xl" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border-soft)" }}>
-                        <div className="text-[10.5px] font-medium mb-1" style={{ color: "var(--color-muted)" }}>{s.label}</div>
-                        <div className="text-lg font-medium tracking-tight">{s.value}</div>
-                        <div className="text-[10.5px] mt-1" style={{ color: "var(--color-green)" }}>{s.delta}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-3 gap-2.5">
-                    {[
-                      { title: "Gym motivation hook", count: "10 variations", color: "linear-gradient(145deg, #4A3F8E 0%, #8B7FFF 60%, #FFB99A 100%)" },
-                      { title: "Nutrition tips", count: "6/15 in progress", color: "linear-gradient(170deg, #5A4FAA 0%, #9D93FF 55%, #FFC6A8 100%)" },
-                      { title: "Morning routine v3", count: "8 variations", color: "linear-gradient(120deg, #3F3475 0%, #7B6FF0 55%, #FFAD8A 100%)" },
-                    ].map((p) => (
-                      <div key={p.title} className="rounded-xl p-2" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border-soft)" }}>
-                        <div className="rounded-lg h-24 mb-2" style={{ background: p.color }} />
-                        <div className="text-[12.5px] font-medium px-1">{p.title}</div>
-                        <div className="text-[11px] px-1" style={{ color: "var(--color-muted)" }}>{p.count}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              <Image
+                src="/dashboard-v3.png"
+                alt="Scaleswap dashboard"
+                width={3024}
+                height={1854}
+                className="rounded-[14px] w-full h-auto"
+                priority
+              />
             </div>
           </RevealSection>
         </div>
@@ -414,7 +336,7 @@ export default function LandingPage() {
             <div className="text-center">
               <Link href="/upload" className="inline-flex items-center gap-2.5 text-sm font-medium px-7 py-3.5 rounded-xl text-white transition-all duration-150 hover:-translate-y-0.5" style={{
                 background: "var(--color-accent)",
-                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15), 0 2px 6px rgba(139,127,255,0.25)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15), -4px 4px 14px rgba(139,127,255,0.4), -8px 8px 28px rgba(139,127,255,0.18)",
               }}>
                 Get access
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
@@ -697,7 +619,7 @@ export default function LandingPage() {
                 <p className="text-[13px] mb-6" style={{ color: "#B8B5AE" }}>For creators who post every day.</p>
                 <Link href="/upload" className="text-center text-sm font-medium py-2.5 rounded-xl mb-6 text-white transition-all duration-150 hover:-translate-y-0.5" style={{
                   background: "var(--color-accent)",
-                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15), 0 2px 6px rgba(139,127,255,0.25)",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15), -4px 4px 14px rgba(139,127,255,0.4), -8px 8px 28px rgba(139,127,255,0.18)",
                 }}>Sign up for free</Link>
                 <p className="text-[12px] mt-auto" style={{ color: "#6B6963" }}>Features coming soon</p>
               </div>
@@ -757,7 +679,7 @@ export default function LandingPage() {
             </p>
             <Link href="/upload" className="inline-flex items-center gap-2.5 text-base font-medium px-8 py-4 rounded-xl text-white transition-all duration-150 hover:-translate-y-0.5" style={{
               background: "var(--color-accent)",
-              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15), 0 2px 6px rgba(139,127,255,0.25)",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15), -4px 4px 14px rgba(139,127,255,0.4), -8px 8px 28px rgba(139,127,255,0.18)",
             }}>
               Start for free
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
@@ -795,7 +717,7 @@ export default function LandingPage() {
               <h4 className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--color-muted)" }}>Community</h4>
               <a href="https://discord.gg/t3ZjPbrFBY" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2.5 text-sm font-medium px-5 py-3 rounded-xl text-white transition-all duration-150 hover:-translate-y-0.5" style={{
                 background: "var(--color-accent)",
-                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15), 0 2px 6px rgba(139,127,255,0.25)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15), -4px 4px 14px rgba(139,127,255,0.4), -8px 8px 28px rgba(139,127,255,0.18)",
               }}>
                 <Image src="/discord-logo.png" alt="Discord" width={20} height={20} className="brightness-0 invert" />
                 Join Discord
