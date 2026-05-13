@@ -1031,8 +1031,9 @@ export function buildFfmpegCommand(
   // Layer 20: Micro sharpen (counters blur)
   videoFilters.push(getUnsharpFilter(rng));
 
-  // Force even dimensions + square pixels + yuv420p for h264 compatibility
-  videoFilters.push("crop=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1,format=yuv420p");
+  // Force even dimensions + square pixels for h264 compatibility
+  // NOTE: format=yuv420p is added separately — after overlay (caption path) or inline (no caption)
+  videoFilters.push("crop=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1");
 
   // === Build audio filter chain ===
   const audioFilters: string[] = [];
@@ -1060,13 +1061,13 @@ export function buildFfmpegCommand(
 
   if (captionInputIdx !== null) {
     // Use filter_complex for caption overlay
+    // Convert video to RGBA before overlay so both streams are in the same color
+    // family (RGB). This avoids the swscaler crash when converting the caption
+    // PNG's rgba/gbr colorspace to yuva420p/bt709 for compositing.
+    // After overlay, convert back to yuv420p for h264 encoding.
     const vfChain = videoFilters.join(",");
-    let fc = `[0:v]${vfChain}[processed]`;
-    // Fix caption PNG colorspace: PNGs decoded as rgba/gbr cause swscaler to fail
-    // converting gbr→bt709 for overlay compositing. setparams re-tags the colorspace
-    // metadata so FFmpeg treats it as bt709 (no pixel conversion needed for RGB data).
-    fc += `;[${captionInputIdx}:v]setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709[caption]`;
-    fc += `;[processed][caption]overlay=0:0[captioned]`;
+    let fc = `[0:v]${vfChain},format=rgba[processed]`;
+    fc += `;[processed][${captionInputIdx}:v]overlay=0:0,format=yuv420p[captioned]`;
 
     if (hasAudio) {
       const afChain = audioFilters.join(",");
@@ -1076,8 +1077,8 @@ export function buildFfmpegCommand(
       cmd.push("-filter_complex", fc, "-map", "[captioned]", "-an");
     }
   } else {
-    // Simple mode: -vf and -af
-    cmd.push("-vf", videoFilters.join(","));
+    // Simple mode: -vf and -af (add format=yuv420p inline since no overlay)
+    cmd.push("-vf", videoFilters.join(",") + ",format=yuv420p");
     if (hasAudio) {
       cmd.push("-af", audioFilters.join(","));
     } else {
@@ -1357,44 +1358,49 @@ export async function generateAllVariants(
     }
   }
 
-  // Parallel execution — run multiple FFmpeg processes concurrently
-  // Conservative: 1 per 4 cores (FFmpeg + filters are very memory-hungry)
-  const concurrency = Math.max(1, Math.min(3, Math.floor(os.cpus().length / 4)));
+  // Sequential execution — process one variant at a time to avoid memory
+  // contention (FFmpeg filter chains + Chromium are very memory-hungry)
   const results: VariantResult[] = [];
   let completed = 0;
 
-  // Build all variant tasks
   const indices = Array.from({ length: variantCount }, (_, k) => startIndex + k);
 
-  // Process in batches of `concurrency`
-  for (let batch = 0; batch < indices.length; batch += concurrency) {
-    const batchIndices = indices.slice(batch, batch + concurrency);
+  for (const i of indices) {
+    const caption = hasCaptions
+      ? (captions.length === 1 ? captions[0] : captions[Math.floor(Math.random() * captions.length)])
+      : undefined;
+    const preCaptionPath = caption ? captionPngPaths.get(caption.text) : undefined;
 
-    const batchResults = await Promise.all(
-      batchIndices.map((i) => {
-        const caption = hasCaptions
-          ? (captions.length === 1 ? captions[0] : captions[Math.floor(Math.random() * captions.length)])
-          : undefined;
-        const preCaptionPath = caption ? captionPngPaths.get(caption.text) : undefined;
+    let result: VariantResult;
+    if (isImage) {
+      result = await generateImageVariant(
+        sourcePath, outputDir, i, gpsCity, caption, dims, sourcePhash, preCaptionPath,
+      );
+    } else {
+      result = await generateVariant(
+        sourcePath, outputDir, i, duration, gpsCity, caption, dims,
+        sourcePhash, hasAudio, mirrorEnabled, preCaptionPath,
+      );
+    }
 
-        if (isImage) {
-          return generateImageVariant(
-            sourcePath, outputDir, i, gpsCity, caption, dims, sourcePhash, preCaptionPath,
-          );
-        }
-
-        return generateVariant(
+    // Retry once if failed (transient resource errors)
+    if (!result.success) {
+      console.warn(`[variant ${i}] Retrying after failure: ${result.error}`);
+      if (isImage) {
+        result = await generateImageVariant(
+          sourcePath, outputDir, i, gpsCity, caption, dims, sourcePhash, preCaptionPath,
+        );
+      } else {
+        result = await generateVariant(
           sourcePath, outputDir, i, duration, gpsCity, caption, dims,
           sourcePhash, hasAudio, mirrorEnabled, preCaptionPath,
         );
-      }),
-    );
-
-    for (const result of batchResults) {
-      results.push(result);
-      completed++;
-      if (onProgress) await onProgress(completed, variantCount, result);
+      }
     }
+
+    results.push(result);
+    completed++;
+    if (onProgress) await onProgress(completed, variantCount, result);
   }
 
   // Clean up temp files
