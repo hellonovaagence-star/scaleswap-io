@@ -331,10 +331,11 @@ function getMetadataArgs(rng: () => number, gpsCity?: string): string[] {
 
 function getSpatialFilter(rng: () => number): string {
   // 2-6px crop — enough to shift DCT bin boundaries at 32x32 downscale
+  // Force even crop amounts so output dimensions stay even (avoids libx264 SAR issues)
   const cropX = randInt(rng, 1, 3);
   const cropY = randInt(rng, 1, 3);
-  const cropW = randInt(rng, 2, 6);
-  const cropH = randInt(rng, 2, 6);
+  const cropW = randInt(rng, 1, 3) * 2; // 2, 4, or 6
+  const cropH = randInt(rng, 1, 3) * 2; // 2, 4, or 6
   return `crop=iw-${cropW}:ih-${cropH}:${cropX}:${cropY},setsar=1`;
 }
 
@@ -514,7 +515,8 @@ function getZoomFilter(rng: () => number): string {
   // 1-2.5% zoom — shifts pixel grid mapping with minimal resampling artifacts
   const zoomFactor = uniform(rng, 1.01, 1.025);
   const z = zoomFactor.toFixed(4);
-  return `scale=iw*${z}:ih*${z}:flags=lanczos,crop=iw/${z}:ih/${z}`;
+  // Round dimensions to even after zoom crop to prevent odd intermediate sizes
+  return `scale=iw*${z}:ih*${z}:flags=lanczos,crop=iw/${z}:ih/${z},crop=trunc(iw/2)*2:trunc(ih/2)*2`;
 }
 
 // ─── Layer 11: Rotation (pHash-aware: shifts spatial content → DCT change) ───
@@ -1028,8 +1030,8 @@ export function buildFfmpegCommand(
   // Layer 20: Micro sharpen (counters blur)
   videoFilters.push(getUnsharpFilter(rng));
 
-  // Force even dimensions + yuv420p for h264 compatibility (geq outputs yuv444p)
-  videoFilters.push("crop=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p");
+  // Force even dimensions + square pixels + yuv420p for h264 compatibility
+  videoFilters.push("crop=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1,format=yuv420p");
 
   // === Build audio filter chain ===
   const audioFilters: string[] = [];
