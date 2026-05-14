@@ -26,8 +26,8 @@ RUN npm run build
 # --- Stage 2: Runtime ---
 FROM node:20-alpine
 
-# Install FFmpeg + Chromium + fontconfig (for custom emoji font)
-RUN apk add --no-cache ffmpeg chromium fontconfig
+# Install FFmpeg + Chromium (emojis rendered via CDN images, no local font needed)
+RUN apk add --no-cache ffmpeg chromium
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV CHROME_PATH=/usr/bin/chromium-browser
@@ -44,11 +44,6 @@ COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
-
-# Install Apple Color Emoji as system font for Chromium
-RUN mkdir -p /usr/share/fonts/apple && \
-    cp /app/public/fonts/AppleColorEmoji.ttc /usr/share/fonts/apple/ && \
-    fc-cache -fv
 
 EXPOSE 3000
 
