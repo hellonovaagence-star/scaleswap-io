@@ -954,23 +954,32 @@ async function generateImageVariant(
       console.log(`[img-variant ${variantIndex}] Caption PNG generated`);
     }
 
-    // Single-pass FFmpeg — transformation layers guarantee sufficient pHash distance
-    const cmd = buildImageFfmpegCommand(sourcePath, outputPath, variantIndex, gpsCity, captionPngPath);
-    const [binary, ...args] = cmd;
-
-    console.log(`[img-variant ${variantIndex}] FFmpeg running...`);
+    // Retry with shifted seed if FFmpeg fails
+    const MAX_ATTEMPTS = 3;
     const t0 = Date.now();
-    try {
-      const { stderr } = await execFileAsync(binary, args, { timeout: 300_000, maxBuffer: 10 * 1024 * 1024 });
-      console.log(`[img-variant ${variantIndex}] FFmpeg done in ${Date.now() - t0}ms`);
-      if (stderr && stderr.includes("Error")) {
-        console.warn(`[img-variant ${variantIndex}] FFmpeg stderr warnings:`, stderr.slice(0, 500));
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const effectiveIndex = attempt === 0 ? variantIndex : variantIndex + 1000 * attempt;
+      const cmd = buildImageFfmpegCommand(sourcePath, outputPath, effectiveIndex, gpsCity, captionPngPath);
+      const [binary, ...args] = cmd;
+
+      console.log(`[img-variant ${variantIndex}] FFmpeg attempt ${attempt} running...`);
+      try {
+        const { stderr } = await execFileAsync(binary, args, { timeout: 300_000, maxBuffer: 10 * 1024 * 1024 });
+        console.log(`[img-variant ${variantIndex}] FFmpeg done in ${Date.now() - t0}ms`);
+        if (stderr && stderr.includes("Error")) {
+          console.warn(`[img-variant ${variantIndex}] FFmpeg stderr warnings:`, stderr.slice(0, 500));
+        }
+        break; // Success
+      } catch (ffErr: unknown) {
+        if (attempt < MAX_ATTEMPTS - 1) {
+          console.warn(`[img-variant ${variantIndex}] FFmpeg attempt ${attempt} failed, retrying with different seed...`);
+          continue;
+        }
+        const ffMsg = ffErr instanceof Error ? ffErr.message : String(ffErr);
+        const ffStderr = (ffErr as { stderr?: string })?.stderr?.slice(0, 1000) || "";
+        console.error(`[img-variant ${variantIndex}] FFmpeg FAILED:`, ffMsg, ffStderr);
+        throw new Error(`FFmpeg failed: ${ffMsg}${ffStderr ? ` | ${ffStderr}` : ""}`);
       }
-    } catch (ffErr: unknown) {
-      const ffMsg = ffErr instanceof Error ? ffErr.message : String(ffErr);
-      const ffStderr = (ffErr as { stderr?: string })?.stderr?.slice(0, 1000) || "";
-      console.error(`[img-variant ${variantIndex}] FFmpeg FAILED:`, ffMsg, ffStderr);
-      throw new Error(`FFmpeg failed: ${ffMsg}${ffStderr ? ` | ${ffStderr}` : ""}`);
     }
 
     // Verify output exists
@@ -1293,11 +1302,25 @@ export async function generateVariant(
       await generateCaptionPng(caption, dims.width, dims.height, captionPngPath);
     }
 
-    // Single-pass FFmpeg — 25 transformation layers guarantee sufficient pHash distance
-    const cmd = buildFfmpegCommand(sourcePath, outputPath, variantIndex, sourceDuration, gpsCity, captionPngPath, hasAudio, mirrorEnabled);
-    const [binary, ...args] = cmd;
+    // Retry with shifted seed if FFmpeg fails (some random parameter combos can
+    // produce dimensions/settings that libx264 rejects)
+    const MAX_ATTEMPTS = 3;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const effectiveIndex = attempt === 0 ? variantIndex : variantIndex + 1000 * attempt;
+      const cmd = buildFfmpegCommand(sourcePath, outputPath, effectiveIndex, sourceDuration, gpsCity, captionPngPath, hasAudio, mirrorEnabled);
+      const [binary, ...args] = cmd;
 
-    await execFileAsync(binary, args, { timeout: 600_000, maxBuffer: 10 * 1024 * 1024 });
+      try {
+        await execFileAsync(binary, args, { timeout: 600_000, maxBuffer: 10 * 1024 * 1024 });
+        break; // Success
+      } catch (ffErr) {
+        if (attempt < MAX_ATTEMPTS - 1) {
+          console.warn(`[variant ${variantIndex}] FFmpeg attempt ${attempt} failed, retrying with different seed...`);
+          continue;
+        }
+        throw ffErr; // Last attempt, propagate error
+      }
+    }
 
     // Layer 8: Binary padding (post-FFmpeg)
     await applyBinaryPadding(outputPath, variantIndex);
@@ -1393,40 +1416,30 @@ export async function generateAllVariants(
       : undefined;
     const preCaptionPath = caption ? captionPngPaths.get(caption.text) : undefined;
 
-    let result: VariantResult;
     if (isImage) {
-      result = await generateImageVariant(
+      return generateImageVariant(
         sourcePath, outputDir, i, gpsCity, caption, dims, undefined, preCaptionPath,
       );
     } else {
-      result = await generateVariant(
+      return generateVariant(
         sourcePath, outputDir, i, duration, gpsCity, caption, dims,
         undefined, hasAudio, mirrorEnabled, preCaptionPath,
       );
     }
-
-    // Retry once if failed (transient resource errors)
-    if (!result.success) {
-      console.warn(`[variant ${i}] Retrying after failure: ${result.error}`);
-      if (isImage) {
-        result = await generateImageVariant(
-          sourcePath, outputDir, i, gpsCity, caption, dims, undefined, preCaptionPath,
-        );
-      } else {
-        result = await generateVariant(
-          sourcePath, outputDir, i, duration, gpsCity, caption, dims,
-          undefined, hasAudio, mirrorEnabled, preCaptionPath,
-        );
-      }
-    }
-
-    return result;
   };
 
-  // Process in batches of CONCURRENCY
+  // Process in batches of CONCURRENCY, retry failures sequentially
   for (let b = 0; b < indices.length; b += CONCURRENCY) {
     const batch = indices.slice(b, b + CONCURRENCY);
     const batchResults = await Promise.all(batch.map((i) => generateOne(i)));
+
+    // Retry any failures sequentially (avoids resource contention on retry)
+    for (let r = 0; r < batchResults.length; r++) {
+      if (!batchResults[r].success) {
+        console.warn(`[variant ${batch[r]}] Parallel attempt failed, retrying sequentially...`);
+        batchResults[r] = await generateOne(batch[r]);
+      }
+    }
 
     for (const result of batchResults) {
       results.push(result);
