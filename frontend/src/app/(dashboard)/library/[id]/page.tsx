@@ -453,13 +453,14 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
         const valid = (sibVariants ?? []).filter((v: Variant) => v.output_url);
         if (valid.length === 0) return;
 
-        const folderName = sibling.title?.replace(/\s+/g, "_") || sibling.id;
+        const prefix = sibling.title?.replace(/\s+/g, "_") || sibling.id.slice(0, 8);
+        const ext = sibling.type === "image" ? ".jpg" : ".mp4";
 
         await Promise.all(
           valid.map(async (v: Variant) => {
             const res = await fetch(v.output_url!);
             const blob = await res.blob();
-            zip.file(`${folderName}/V${String(v.variant_index).padStart(2, "0")}.mp4`, blob);
+            zip.file(`${prefix}_V${String(v.variant_index).padStart(2, "0")}${ext}`, blob);
             totalFiles++;
           })
         );
