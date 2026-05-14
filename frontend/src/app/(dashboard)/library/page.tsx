@@ -333,9 +333,7 @@ export default function LibraryPage() {
       await supabase.storage.from("videos").remove(storagePaths);
     }
     if (variantIds.length > 0) {
-      for (const vid of variantIds) {
-        await supabase.from("variants").update({ output_url: null, thumbnail_url: null }).eq("id", vid);
-      }
+      await supabase.from("variants").delete().in("id", variantIds);
     }
     fetchData();
 

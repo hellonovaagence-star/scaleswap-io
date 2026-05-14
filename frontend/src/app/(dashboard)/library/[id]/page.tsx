@@ -234,17 +234,12 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
     await supabase.storage.from("videos").remove([storagePath]);
   }, [supabase]);
 
-  /** Clean up variant files from storage after download, then clear URLs in DB */
+  /** Clean up variant files from storage after download, then delete from DB */
   const cleanupVariants = useCallback(async (variantIds: string[], urls: string[]) => {
     // Delete files from storage
     await Promise.all(urls.map((u) => deleteFromStorage(u)));
-    // Clear output_url & thumbnail_url so the UI reflects deletion
-    for (const vid of variantIds) {
-      await supabase
-        .from("variants")
-        .update({ output_url: null, thumbnail_url: null })
-        .eq("id", vid);
-    }
+    // Delete variant rows from DB entirely
+    await supabase.from("variants").delete().in("id", variantIds);
     // Refresh UI
     fetchData();
   }, [deleteFromStorage, supabase, fetchData]);
