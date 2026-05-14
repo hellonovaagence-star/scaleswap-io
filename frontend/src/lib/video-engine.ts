@@ -162,62 +162,88 @@ export interface CaptionOverlay {
 }
 
 /**
- * Convert emoji characters in text to <img> tags pointing to Apple emoji PNGs on CDN.
- * Non-emoji text is HTML-escaped. This ensures Apple-style emojis render on any platform.
+ * Fetch an emoji PNG from CDN and return as base64 data URI.
+ * Tries without fe0f first, then with fe0f as fallback.
  */
-function textToHtmlWithAppleEmojis(text: string): string {
-  // Regex to detect emoji characters (broad coverage)
-  const emojiRegex =
-    /(\p{Extended_Pictographic}(\u{FE0F}|\u{200D}|\p{Extended_Pictographic})*)/gu;
+const _emojiCache = new Map<string, string>();
+async function fetchEmojiBase64(segment: string): Promise<string | null> {
+  const cached = _emojiCache.get(segment);
+  if (cached) return cached;
 
-  // Use Intl.Segmenter for proper grapheme cluster splitting if available
-  if (typeof Intl !== "undefined" && Intl.Segmenter) {
-    const segmenter = new Intl.Segmenter("en", { granularity: "grapheme" });
-    const segments = [...segmenter.segment(text)];
-    let result = "";
+  const chars = [...segment];
+  // Try without fe0f first, then with fe0f
+  const cpWithout = chars
+    .map((ch) => ch.codePointAt(0)!.toString(16).toLowerCase())
+    .filter((cp) => cp !== "fe0f")
+    .join("-");
+  const cpWith = chars
+    .map((ch) => ch.codePointAt(0)!.toString(16).toLowerCase())
+    .join("-");
 
-    for (const { segment } of segments) {
-      if (emojiRegex.test(segment)) {
-        // Reset regex lastIndex after test
-        emojiRegex.lastIndex = 0;
-        // Build codepoints string: each codepoint as hex, joined by dashes, lowercase
-        const codepoints = [...segment]
-          .map((ch) => ch.codePointAt(0)!.toString(16).toLowerCase())
-          .filter((cp) => cp !== "fe0f") // Remove variation selector for filename
-          .join("-");
-        const cdnUrl = `https://cdn.jsdelivr.net/npm/emoji-datasource-apple@16.0.0/img/apple/64/${codepoints}.png`;
-        // Also try with fe0f as fallback via onerror
-        const codepointsWithFe0f = [...segment]
-          .map((ch) => ch.codePointAt(0)!.toString(16).toLowerCase())
-          .join("-");
-        const cdnUrlFallback = `https://cdn.jsdelivr.net/npm/emoji-datasource-apple@16.0.0/img/apple/64/${codepointsWithFe0f}.png`;
-        result += `<img class="emoji" src="${cdnUrl}" onerror="this.onerror=null;this.src='${cdnUrlFallback}'" alt="${segment}" />`;
-      } else {
-        // HTML-escape non-emoji text
-        result += segment
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;");
+  for (const cp of [cpWithout, cpWith]) {
+    try {
+      const url = `https://cdn.jsdelivr.net/npm/emoji-datasource-apple@16.0.0/img/apple/64/${cp}.png`;
+      const resp = await fetch(url);
+      if (resp.ok) {
+        const buf = Buffer.from(await resp.arrayBuffer());
+        const dataUri = `data:image/png;base64,${buf.toString("base64")}`;
+        _emojiCache.set(segment, dataUri);
+        return dataUri;
       }
+    } catch {
+      // try next
     }
-    return result;
+  }
+  return null;
+}
+
+/**
+ * Convert emoji characters in text to <img> tags with base64-embedded Apple emoji PNGs.
+ * Non-emoji text is HTML-escaped. Fetches PNGs from CDN server-side and embeds them.
+ */
+async function textToHtmlWithAppleEmojis(text: string): Promise<string> {
+  const segmenter = new Intl.Segmenter("en", { granularity: "grapheme" });
+  const segments = [...segmenter.segment(text)];
+
+  // Detect which segments are emojis and fetch them in parallel
+  const emojiRegex = /\p{Extended_Pictographic}/u;
+  const fetchPromises: Promise<{ idx: number; dataUri: string | null }>[] = [];
+
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i].segment;
+    if (emojiRegex.test(seg)) {
+      fetchPromises.push(
+        fetchEmojiBase64(seg).then((dataUri) => ({ idx: i, dataUri }))
+      );
+    }
   }
 
-  // Fallback: simple regex replacement (less accurate for ZWJ sequences)
-  return text.replace(/[^]/gu, (char) => {
-    if (emojiRegex.test(char)) {
-      emojiRegex.lastIndex = 0;
-      const cp = char.codePointAt(0)!.toString(16).toLowerCase();
-      const cdnUrl = `https://cdn.jsdelivr.net/npm/emoji-datasource-apple@16.0.0/img/apple/64/${cp}.png`;
-      return `<img class="emoji" src="${cdnUrl}" alt="${char}" />`;
+  const results = await Promise.all(fetchPromises);
+  const emojiMap = new Map<number, string | null>();
+  for (const { idx, dataUri } of results) {
+    emojiMap.set(idx, dataUri);
+  }
+
+  let html = "";
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i].segment;
+    if (emojiMap.has(i)) {
+      const dataUri = emojiMap.get(i);
+      if (dataUri) {
+        html += `<img class="emoji" src="${dataUri}" alt="${seg}" />`;
+      } else {
+        // Fallback: render as text (will be tofu on Linux but at least won't break)
+        html += seg;
+      }
+    } else {
+      html += seg
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
     }
-    return char
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  });
+  }
+  return html;
 }
 
 /**
@@ -290,8 +316,8 @@ async function generateCaptionPng(
   else if (caption.position === "bottom") yPercent = 88;
   else yPercent = 50;
 
-  // Convert text to HTML with Apple emoji images from CDN
-  const captionHtml = textToHtmlWithAppleEmojis(text);
+  // Convert text to HTML with base64-embedded Apple emoji images
+  const captionHtml = await textToHtmlWithAppleEmojis(text);
 
   const html = `<!DOCTYPE html>
 <html><head><style>
@@ -338,7 +364,7 @@ async function generateCaptionPng(
   const page = await browser.newPage();
   try {
     await page.setViewport({ width: videoWidth, height: videoHeight, deviceScaleFactor: 1 });
-    await page.setContent(html, { waitUntil: "networkidle0" });
+    await page.setContent(html, { waitUntil: "load" });
     await page.screenshot({ path: outputPath, omitBackground: true, type: "png" });
   } finally {
     await page.close();
