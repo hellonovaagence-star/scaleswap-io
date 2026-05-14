@@ -148,7 +148,7 @@ export default function CaptionEditor({ caption, groups, initialGroupIds, onSave
 
   const effectiveFontSize = Math.round(fontSize * textScale);
   const previewFontSize = Math.max(8, fontSize * 0.35);
-  const previewStrokeWidth = Math.max(0.3, previewFontSize * 0.035);
+  const previewStrokeWidth = Math.max(0.5, previewFontSize * 0.07);
   const snappedPoint = SNAP_POINTS.find((s) => Math.abs(customY - s.y) < 1.5);
 
   return createPortal(

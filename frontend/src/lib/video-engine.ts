@@ -280,8 +280,8 @@ async function generateCaptionPng(
   const stroke = caption.strokeColor || "black";
   const strokeEnabled = stroke !== "transparent";
   const text = caption.text || "";
-  // Stroke width: ~3.5% of font size, matching TikTok's thin outline style
-  const strokeWidth = Math.max(1, Math.round(size * 0.035));
+  // Stroke width: ~7% of font size, matching TikTok's outline style
+  const strokeWidth = Math.max(1, Math.round(size * 0.07));
 
   // Build @font-face + font-family based on caption.fontFamily
   let fontFaceBlock = "";
