@@ -138,7 +138,7 @@ async function getCaptionBrowser(): Promise<Browser> {
   _browserLaunchPromise = puppeteer.launch({
     executablePath: resolveChromePath(),
     headless: true,
-    args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+    args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--font-render-hinting=none"],
   });
   try {
     _browser = await _browserLaunchPromise;
@@ -200,7 +200,7 @@ async function generateCaptionPng(
 
   // Build @font-face + font-family based on caption.fontFamily
   let fontFaceBlock = "";
-  let fontFamilyCss = "'Helvetica Neue', Helvetica, Arial, sans-serif";
+  let fontFamilyCss = "'Helvetica Neue', Helvetica, Arial, sans-serif, 'Apple Color Emoji'";
 
   if (caption.fontFamily === "tiktok") {
     try {
@@ -214,7 +214,7 @@ async function generateCaptionPng(
           font-weight: 700;
           font-style: normal;
         }`;
-      fontFamilyCss = "'TikTokSans', sans-serif";
+      fontFamilyCss = "'TikTokSans', sans-serif, 'Apple Color Emoji'";
     } catch {
       // Fallback if font file not found
     }

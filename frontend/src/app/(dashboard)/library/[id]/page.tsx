@@ -34,12 +34,18 @@ interface Project {
 
 interface Variant {
   id: string;
+  project_id?: string;
   variant_index: number;
   status: string;
   output_url: string | null;
   hash: string | null;
   phash_distance: number | null;
   thumbnail_url: string | null;
+}
+
+interface BatchVariant extends Variant {
+  project_id: string;
+  project_title: string;
 }
 
 function timeAgo(dateStr: string) {
@@ -75,6 +81,9 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
   const [genCaptionGroupId, setGenCaptionGroupId] = useState("");
   const [genMirror, setGenMirror] = useState(false);
   const [batchSiblings, setBatchSiblings] = useState<Project[]>([]);
+  const [allBatchVariants, setAllBatchVariants] = useState<BatchVariant[]>([]);
+  const [showVideosDropdown, setShowVideosDropdown] = useState(false);
+  const videosDropdownRef = useRef<HTMLDivElement>(null);
   const batchStripRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const supabase = createClient();
@@ -144,6 +153,52 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
     const activeEl = batchStripRef.current.querySelector('[data-active="true"]');
     if (activeEl) activeEl.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
   }, [batchSiblings, activeId]);
+
+  // Fetch ALL variants for batch mode
+  const fetchAllBatchVariants = useCallback(async () => {
+    if (batchSiblings.length <= 1) { setAllBatchVariants([]); return; }
+    const ids = batchSiblings.map((s) => s.id);
+    const { data } = await supabase
+      .from("variants")
+      .select("*")
+      .in("project_id", ids)
+      .order("variant_index");
+    const enriched: BatchVariant[] = (data ?? []).map((v: Variant & { project_id: string }) => {
+      const proj = batchSiblings.find((s) => s.id === v.project_id);
+      return { ...v, project_title: proj?.title || "" };
+    });
+    setAllBatchVariants(enriched);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchSiblings]);
+
+  useEffect(() => {
+    fetchAllBatchVariants();
+  }, [fetchAllBatchVariants]);
+
+  // Poll batch variants while any sibling is processing
+  useEffect(() => {
+    if (batchSiblings.length <= 1) return;
+    const anyProcessing = batchSiblings.some((s) => s.status === "processing");
+    if (!anyProcessing && project?.status !== "processing") return;
+    const interval = setInterval(() => {
+      fetchAllBatchVariants();
+      fetchData();
+    }, 2000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchSiblings, project?.status, fetchAllBatchVariants]);
+
+  // Close videos dropdown on outside click
+  useEffect(() => {
+    if (!showVideosDropdown) return;
+    const handler = (e: MouseEvent) => {
+      if (videosDropdownRef.current && !videosDropdownRef.current.contains(e.target as Node)) {
+        setShowVideosDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showVideosDropdown]);
 
   // Poll variants every 2s while project is processing (max 10 min)
   useEffect(() => {
@@ -436,6 +491,11 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
     fetchData();
   };
 
+  const isBatchMode = batchSiblings.length > 1;
+  const batchTotalVariants = isBatchMode ? allBatchVariants : [];
+  const batchValidCount = batchTotalVariants.filter((v) => v.status === "valid").length;
+  const batchProcessingCount = batchTotalVariants.filter((v) => v.status === "pending" || v.status === "processing").length;
+
   if (!project) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -450,11 +510,95 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
       <div className="flex items-end justify-between mb-5 gap-4">
         <div>
           <h1 className="text-2xl font-[550] tracking-tight leading-tight" style={{ letterSpacing: "-0.025em" }}>
-            {project.title}
+            {isBatchMode ? (
+              <>Bulk <em className="not-italic font-normal" style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontStyle: "italic", color: "var(--color-accent)" }}>project</em></>
+            ) : project.title}
           </h1>
-          <p className="text-[13.5px] mt-1" style={{ color: "var(--color-muted)" }}>
-            {variants.length} variation{variants.length !== 1 ? "s" : ""} · Created {timeAgo(project.created_at)}
-          </p>
+          <div className="flex items-center gap-3 mt-1.5">
+            {isBatchMode ? (
+              <>
+                {/* "XX vidéos" dropdown trigger */}
+                <div className="relative" ref={videosDropdownRef}>
+                  <button
+                    onClick={() => setShowVideosDropdown(!showVideosDropdown)}
+                    className="inline-flex items-center gap-1.5 text-[13px] font-medium px-2.5 py-1 rounded-lg border transition-all"
+                    style={{
+                      background: showVideosDropdown ? "var(--color-accent-soft)" : "var(--color-surface)",
+                      borderColor: showVideosDropdown ? "var(--color-accent)" : "var(--color-border)",
+                      color: showVideosDropdown ? "var(--color-accent-hover)" : "var(--color-ink-2)",
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    {batchSiblings.length} vidéo{batchSiblings.length !== 1 ? "s" : ""}
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transition: "transform 0.2s", transform: showVideosDropdown ? "rotate(180deg)" : "rotate(0)" }}><polyline points="6 9 12 15 18 9"/></svg>
+                  </button>
+
+                  {/* Dropdown */}
+                  {showVideosDropdown && (
+                    <div
+                      className="absolute top-full left-0 mt-1.5 w-[320px] rounded-[12px] border shadow-lg z-50 overflow-hidden"
+                      style={{
+                        background: "var(--color-surface)",
+                        borderColor: "var(--color-border)",
+                        boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                      }}
+                    >
+                      <div className="px-3 py-2 border-b" style={{ borderColor: "var(--color-border-soft)" }}>
+                        <span className="text-[11px] font-medium uppercase tracking-wider" style={{ color: "var(--color-muted)", letterSpacing: "0.04em" }}>Source videos</span>
+                      </div>
+                      <div className="max-h-[280px] overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
+                        {batchSiblings.map((s, i) => {
+                          const sibVariantCount = allBatchVariants.filter((v) => v.project_id === s.id).length;
+                          return (
+                            <div
+                              key={s.id}
+                              className="w-full flex items-center gap-3 px-3 py-2.5"
+                              style={{ borderBottom: "1px solid var(--color-border-soft)" }}
+                            >
+                              <div className="w-9 h-9 rounded-[6px] overflow-hidden shrink-0" style={{ background: gradients[i % gradients.length] }}>
+                                {s.source_url && (
+                                  s.type === "image" ? (
+                                    <img src={s.source_url} alt="" className="w-full h-full object-cover" />
+                                  ) : (
+                                    <video src={`${s.source_url}#t=0.1`} muted playsInline preload="metadata" className="w-full h-full object-cover" />
+                                  )
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0 text-left">
+                                <div className="text-[12.5px] font-medium truncate" style={{ color: "var(--color-ink)" }}>
+                                  {s.title}
+                                </div>
+                                <div className="text-[11px]" style={{ color: "var(--color-muted)" }}>
+                                  {sibVariantCount} variation{sibVariantCount !== 1 ? "s" : ""} · {timeAgo(s.created_at)}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="px-3 py-2 border-t" style={{ borderColor: "var(--color-border-soft)" }}>
+                        <button
+                          onClick={() => { setShowVideosDropdown(false); router.push("/upload"); }}
+                          className="w-full flex items-center justify-center gap-1.5 text-[12px] font-medium py-1.5 rounded-lg transition-all hover:bg-[var(--color-surface-2)]"
+                          style={{ color: "var(--color-accent)" }}
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                          Add video to batch
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <span className="text-[13px]" style={{ color: "var(--color-muted)" }}>
+                  {allBatchVariants.length} variation{allBatchVariants.length !== 1 ? "s" : ""} · Created {timeAgo(project.created_at)}
+                </span>
+              </>
+            ) : (
+              <p className="text-[13.5px]" style={{ color: "var(--color-muted)" }}>
+                {variants.length} variation{variants.length !== 1 ? "s" : ""} · Created {timeAgo(project.created_at)}
+              </p>
+            )}
+          </div>
         </div>
         <div className="flex gap-2">
           <button onClick={handleDelete} className="text-[13px] font-medium px-3 py-2 rounded-lg" style={{
@@ -463,60 +607,10 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
         </div>
       </div>
 
-      {/* Batch navigation strip */}
-      {batchSiblings.length > 1 && (
-        <div
-          ref={batchStripRef}
-          className="flex gap-2.5 mb-5 pb-2 -mx-1 px-1"
-          style={{
-            overflowX: "auto",
-            scrollSnapType: "x mandatory",
-            scrollbarWidth: "none",
-          }}
-        >
-          {batchSiblings.map((s) => {
-            const isActive = s.id === activeId;
-            return (
-              <button
-                key={s.id}
-                data-active={isActive}
-                onClick={() => !isActive && navigateToSibling(s.id)}
-                className="shrink-0 flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] border transition-all"
-                style={{
-                  scrollSnapAlign: "center",
-                  background: isActive ? "var(--color-accent-soft)" : "var(--color-surface)",
-                  borderColor: isActive ? "var(--color-accent)" : "var(--color-border-soft)",
-                  boxShadow: isActive ? "0 0 0 2px var(--color-accent-ring)" : "0 1px 2px rgba(0,0,0,0.04)",
-                }}
-              >
-                <div
-                  className="w-10 h-10 rounded-[6px] overflow-hidden shrink-0"
-                  style={{ background: gradients[batchSiblings.indexOf(s) % gradients.length] }}
-                >
-                  {s.source_url && (
-                    s.type === "image" ? (
-                      <img src={s.source_url} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <video src={`${s.source_url}#t=0.1`} muted playsInline preload="metadata" className="w-full h-full object-cover" />
-                    )
-                  )}
-                </div>
-                <span
-                  className="text-[12px] font-medium max-w-[100px] truncate"
-                  style={{ color: isActive ? "var(--color-accent-hover)" : "var(--color-ink-2)" }}
-                >
-                  {s.title}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-
       {/* Main content */}
       <div>
-          {/* Source player */}
-          <div className="grid gap-4 p-3.5 rounded-[14px] border mb-5" style={{
+          {/* Source player — hidden in batch mode */}
+          {!isBatchMode && (<div className="grid gap-4 p-3.5 rounded-[14px] border mb-5" style={{
             gridTemplateColumns: "160px 1fr",
             background: "var(--color-surface)",
             borderColor: "var(--color-border-soft)",
@@ -587,10 +681,38 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
                 {isImageProject ? "Photo optimized for platform fingerprint bypass." : "Vertical 9:16 format optimized for Reels/TikTok/Shorts."}
               </p>
             </div>
-          </div>
+          </div>)}
 
-          {/* Progress bar — visible while processing */}
-          {project.status === "processing" && variants.length > 0 && (() => {
+          {/* Batch progress bar */}
+          {isBatchMode && batchProcessingCount > 0 && (() => {
+            const done = allBatchVariants.filter((v) => v.status === "valid" || v.status === "invalid").length;
+            const total = allBatchVariants.length;
+            const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+            return (
+              <div className="rounded-[12px] border p-4 mb-5" style={{
+                background: "var(--color-surface)",
+                borderColor: "var(--color-border-soft)",
+              }}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="animate-spin" style={{ color: "var(--color-accent)" }}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                    <span className="text-[13px] font-medium" style={{ color: "var(--color-ink)" }}>
+                      Processing all variants...
+                    </span>
+                  </div>
+                  <span className="text-[12px] font-medium" style={{ color: "var(--color-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+                    {done}/{total} ({pct}%)
+                  </span>
+                </div>
+                <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: "var(--color-surface-2)" }}>
+                  <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: "var(--color-accent)" }} />
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Progress bar — visible while processing (single project) */}
+          {!isBatchMode && project.status === "processing" && variants.length > 0 && (() => {
             const done = variants.filter((v) => v.status === "valid" || v.status === "invalid").length;
             const total = variants.length;
             const pct = total > 0 ? Math.round((done / total) * 100) : 0;
@@ -690,8 +812,8 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
                 </span>
               </button>
               <button
-                onClick={handleExport}
-                disabled={exporting || variants.filter(v => v.status === "valid").length === 0}
+                onClick={isBatchMode ? handleBatchExportAll : handleExport}
+                disabled={(isBatchMode ? batchExporting : exporting) || (isBatchMode ? batchValidCount === 0 : variants.filter(v => v.status === "valid").length === 0)}
                 className="text-[13px] font-medium px-3 py-1.5 rounded-lg border transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{
                   background: "var(--color-surface)",
@@ -700,12 +822,12 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
                 }}
               >
                 <span className="flex items-center gap-1.5">
-                  {exporting ? (
+                  {(isBatchMode ? batchExporting : exporting) ? (
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
                   ) : (
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                   )}
-                  {exporting ? "Exporting..." : selectMode && selectedIds.size > 0 ? `Export (${selectedIds.size})` : "Export all"}
+                  {(isBatchMode ? batchExporting : exporting) ? "Exporting..." : selectMode && selectedIds.size > 0 ? `Export (${selectedIds.size})` : "Export all"}
                 </span>
               </button>
             </div>
@@ -904,61 +1026,113 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
             </div>
           )}
 
-          {variants.length > 0 ? (
-            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(165px, 1fr))" }}>
-              {variants.map((v, i) => (
-                <VariationCard
-                  key={v.id}
-                  id={v.id}
-                  index={v.variant_index}
-                  gradient={gradients[i % gradients.length]}
-                  status={v.status as "valid" | "invalid" | "processing" | "pending"}
-                  hash={v.hash || `0x${v.id.slice(0, 8)}`}
-                  videoUrl={v.output_url}
-                  thumbnailUrl={v.thumbnail_url}
-                  mediaType={isImageProject ? "image" : "video"}
-                  selected={selectMode ? selectedIds.has(v.id) : undefined}
-                  onClick={() => {
-                    if (selectMode) {
-                      if (v.status === "valid") toggleSelect(v.id);
-                    } else if (v.status === "valid" && v.output_url) {
-                      const ext = isImageProject ? ".jpg" : ".mp4";
-                      setPlayerVideo({
-                        url: v.output_url,
-                        title: `Variation ${String(v.variant_index).padStart(2, "0")}`,
-                        filename: `${project?.title?.replace(/\s+/g, "_") || "variant"}_V${String(v.variant_index).padStart(2, "0")}${ext}`,
-                        isImage: isImageProject,
-                        variantId: v.id,
-                        thumbnailUrl: v.thumbnail_url,
-                      });
-                    }
-                  }}
-                />
-              ))}
-            </div>
+          {/* Variations grid */}
+          {isBatchMode ? (
+            /* Batch mode: show ALL variants from ALL siblings */
+            allBatchVariants.length > 0 ? (
+              <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(185px, 1fr))" }}>
+                {allBatchVariants.map((v, i) => (
+                  <div key={v.id} className="flex flex-col">
+                    <VariationCard
+                      id={v.id}
+                      index={v.variant_index}
+                      gradient={gradients[i % gradients.length]}
+                      status={v.status as "valid" | "invalid" | "processing" | "pending"}
+                      hash={v.hash || `0x${v.id.slice(0, 8)}`}
+                      videoUrl={v.output_url}
+                      thumbnailUrl={v.thumbnail_url}
+                      mediaType={isImageProject ? "image" : "video"}
+                      selected={selectMode ? selectedIds.has(v.id) : undefined}
+                      onClick={() => {
+                        if (selectMode) {
+                          if (v.status === "valid") toggleSelect(v.id);
+                        } else if (v.status === "valid" && v.output_url) {
+                          const ext = isImageProject ? ".jpg" : ".mp4";
+                          const proj = batchSiblings.find((s) => s.id === v.project_id);
+                          setPlayerVideo({
+                            url: v.output_url,
+                            title: `${v.project_title} · V${String(v.variant_index).padStart(2, "0")}`,
+                            filename: `${proj?.title?.replace(/\s+/g, "_") || "variant"}_V${String(v.variant_index).padStart(2, "0")}${ext}`,
+                            isImage: isImageProject,
+                            variantId: v.id,
+                            thumbnailUrl: v.thumbnail_url,
+                          });
+                        }
+                      }}
+                    />
+                    <div className="text-[10px] font-medium mt-1 truncate px-0.5" style={{ color: "var(--color-muted)" }}>
+                      {v.project_title}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12 rounded-[14px] border" style={{
+                background: "var(--color-surface)",
+                borderColor: "var(--color-border-soft)",
+              }}>
+                <p className="text-[14px]" style={{ color: "var(--color-muted)" }}>No variations generated yet</p>
+                <p className="text-[12.5px] mt-1 mb-4" style={{ color: "var(--color-muted-2)" }}>Select a video from the dropdown and generate variations</p>
+              </div>
+            )
           ) : (
-            <div className="text-center py-12 rounded-[14px] border" style={{
-              background: "var(--color-surface)",
-              borderColor: "var(--color-border-soft)",
-            }}>
-              <p className="text-[14px]" style={{ color: "var(--color-muted)" }}>No variations generated yet</p>
-              <p className="text-[12.5px] mt-1 mb-4" style={{ color: "var(--color-muted-2)" }}>Click below to generate variations</p>
-              {genError && (
-                <p className="text-[12.5px] mb-3 px-4 py-2 rounded-lg mx-auto inline-block" style={{ background: "var(--color-red-soft)", color: "var(--color-red)" }}>{genError}</p>
-              )}
-              <button
-                onClick={() => setShowGenModal(true)}
-                disabled={generating || project.status === "processing"}
-                className="inline-flex items-center gap-2 text-[13.5px] font-medium px-5 py-2.5 rounded-[10px] text-white transition-all disabled:opacity-50"
-                style={{
-                  background: "var(--color-accent)",
-                  boxShadow: "0 2px 8px rgba(139,127,255,0.35)",
-                }}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                Generate variations
-              </button>
-            </div>
+            /* Single project mode */
+            variants.length > 0 ? (
+              <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(165px, 1fr))" }}>
+                {variants.map((v, i) => (
+                  <VariationCard
+                    key={v.id}
+                    id={v.id}
+                    index={v.variant_index}
+                    gradient={gradients[i % gradients.length]}
+                    status={v.status as "valid" | "invalid" | "processing" | "pending"}
+                    hash={v.hash || `0x${v.id.slice(0, 8)}`}
+                    videoUrl={v.output_url}
+                    thumbnailUrl={v.thumbnail_url}
+                    mediaType={isImageProject ? "image" : "video"}
+                    selected={selectMode ? selectedIds.has(v.id) : undefined}
+                    onClick={() => {
+                      if (selectMode) {
+                        if (v.status === "valid") toggleSelect(v.id);
+                      } else if (v.status === "valid" && v.output_url) {
+                        const ext = isImageProject ? ".jpg" : ".mp4";
+                        setPlayerVideo({
+                          url: v.output_url,
+                          title: `Variation ${String(v.variant_index).padStart(2, "0")}`,
+                          filename: `${project?.title?.replace(/\s+/g, "_") || "variant"}_V${String(v.variant_index).padStart(2, "0")}${ext}`,
+                          isImage: isImageProject,
+                          variantId: v.id,
+                          thumbnailUrl: v.thumbnail_url,
+                        });
+                      }
+                    }}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12 rounded-[14px] border" style={{
+                background: "var(--color-surface)",
+                borderColor: "var(--color-border-soft)",
+              }}>
+                <p className="text-[14px]" style={{ color: "var(--color-muted)" }}>No variations generated yet</p>
+                <p className="text-[12.5px] mt-1 mb-4" style={{ color: "var(--color-muted-2)" }}>Click below to generate variations</p>
+                {genError && (
+                  <p className="text-[12.5px] mb-3 px-4 py-2 rounded-lg mx-auto inline-block" style={{ background: "var(--color-red-soft)", color: "var(--color-red)" }}>{genError}</p>
+                )}
+                <button
+                  onClick={() => setShowGenModal(true)}
+                  disabled={generating || project.status === "processing"}
+                  className="inline-flex items-center gap-2 text-[13.5px] font-medium px-5 py-2.5 rounded-[10px] text-white transition-all disabled:opacity-50"
+                  style={{
+                    background: "var(--color-accent)",
+                    boxShadow: "0 2px 8px rgba(139,127,255,0.35)",
+                  }}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                  Generate variations
+                </button>
+              </div>
+            )
           )}
       </div>
 
@@ -1172,72 +1346,7 @@ export default function LibraryDetailPage({ params }: { params: Promise<{ id: st
         </div>,
         document.body
       )}
-      {/* Batch bottom bar */}
-      {batchSiblings.length > 1 && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 border-t" style={{
-          background: "var(--color-surface)",
-          borderColor: "var(--color-border)",
-          boxShadow: "0 -4px 20px rgba(0,0,0,0.08)",
-        }}>
-          <div className="flex items-center gap-3 px-6 py-3 max-w-[1400px] mx-auto">
-            {/* Thumbnails strip */}
-            <div className="flex items-center gap-2 flex-1 min-w-0 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-              {batchSiblings.map((s, i) => {
-                const isActive = s.id === activeId;
-                return (
-                  <button
-                    key={s.id}
-                    onClick={() => navigateToSibling(s.id)}
-                    className="shrink-0 rounded-[8px] overflow-hidden transition-all"
-                    style={{
-                      width: 40,
-                      height: 40,
-                      outline: isActive ? "2px solid var(--color-accent)" : "1px solid var(--color-border-soft)",
-                      outlineOffset: isActive ? 1 : 0,
-                      opacity: isActive ? 1 : 0.7,
-                    }}
-                  >
-                    {s.source_url ? (
-                      s.type === "image" ? (
-                        <img src={s.source_url} alt="" className="w-full h-full object-cover" />
-                      ) : (
-                        <video src={`${s.source_url}#t=0.1`} muted playsInline preload="metadata" className="w-full h-full object-cover" />
-                      )
-                    ) : (
-                      <div className="w-full h-full" style={{ background: gradients[i % gradients.length] }} />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Info + Export all */}
-            <div className="flex items-center gap-3 shrink-0">
-              <span className="text-[12px] font-medium" style={{ color: "var(--color-muted)" }}>
-                {batchSiblings.length} files
-              </span>
-              <button
-                onClick={handleBatchExportAll}
-                disabled={batchExporting}
-                className="text-[13px] font-medium px-4 py-2 rounded-lg text-white transition-all disabled:opacity-40"
-                style={{
-                  background: "var(--color-accent)",
-                  boxShadow: "0 1px 2px rgba(139,127,255,0.3), inset 0 1px 0 rgba(255,255,255,0.15)",
-                }}
-              >
-                <span className="flex items-center gap-1.5">
-                  {batchExporting ? (
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
-                  ) : (
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                  )}
-                  {batchExporting ? "Exporting..." : "Export all (.mp4)"}
-                </span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Bottom padding for batch mode (no bottom bar anymore) */}
     </>
   );
 }

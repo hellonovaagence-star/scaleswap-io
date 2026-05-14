@@ -130,6 +130,36 @@ export default function LibraryPage() {
       .sort((a, b) => new Date(b.projects[0].created_at).getTime() - new Date(a.projects[0].created_at).getTime());
   })();
 
+  // Build a merged list for grid/list: batch siblings → single "bulk" entry, unit projects stay as-is
+  type GridItem = { kind: "unit"; project: Project } | { kind: "bulk"; batch_id: string; projects: Project[] };
+  const gridItems: GridItem[] = (() => {
+    if (projectFilter === "bulk") return []; // handled by batchGroups
+    const seenBatches = new Map<string, Project[]>();
+    const items: GridItem[] = [];
+    for (const p of filteredProjects) {
+      if (p.batch_id) {
+        if (!seenBatches.has(p.batch_id)) {
+          seenBatches.set(p.batch_id, []);
+        }
+        seenBatches.get(p.batch_id)!.push(p);
+      } else {
+        items.push({ kind: "unit", project: p });
+      }
+    }
+    // Insert bulk cards at the position of their first project (by created_at)
+    for (const [batch_id, projects] of seenBatches) {
+      projects.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      items.push({ kind: "bulk", batch_id, projects });
+    }
+    // Sort by newest first
+    items.sort((a, b) => {
+      const dateA = a.kind === "unit" ? a.project.created_at : a.projects[0].created_at;
+      const dateB = b.kind === "unit" ? b.project.created_at : b.projects[0].created_at;
+      return new Date(dateB).getTime() - new Date(dateA).getTime();
+    });
+    return items;
+  })();
+
   const handleSaveGroup = async () => {
     if (!groupName.trim()) return;
     const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -161,6 +191,8 @@ export default function LibraryPage() {
         await supabase.storage.from("videos").remove(files.map((f) => `${prefix}${f.name}`));
       }
     }
+    await supabase.from("project_group_members").delete().eq("project_id", id);
+    await supabase.from("variants").delete().eq("project_id", id);
     await supabase.from("projects").delete().eq("id", id);
     fetchData();
   };
@@ -218,6 +250,9 @@ export default function LibraryPage() {
         }
       }
     }
+    // Delete related records first to avoid FK constraint errors
+    await supabase.from("project_group_members").delete().in("project_id", ids);
+    await supabase.from("variants").delete().in("project_id", ids);
     await supabase.from("projects").delete().in("id", ids);
     setSelectedProjectIds(new Set());
     setSelectMode(false);
@@ -316,19 +351,6 @@ export default function LibraryPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={toggleSelectMode}
-            className="inline-flex items-center gap-[7px] text-[13px] font-medium px-3 py-2 rounded-lg border transition-all"
-            style={{
-              background: selectMode ? "var(--color-accent-soft)" : "var(--color-surface)",
-              borderColor: selectMode ? "var(--color-accent)" : "var(--color-border)",
-              color: selectMode ? "var(--color-accent-hover)" : "var(--color-ink-2)",
-              boxShadow: "0 1px 2px rgba(11,11,10,0.04)",
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-            {selectMode ? "Cancel" : "Select"}
-          </button>
           <button
             onClick={openCreateGroup}
             className="inline-flex items-center gap-[7px] text-[13px] font-medium px-3 py-2 rounded-lg border transition-all"
@@ -445,6 +467,19 @@ export default function LibraryPage() {
             className="bg-transparent border-none outline-none text-[13px] flex-1 min-w-0"
           />
         </label>
+        <button
+          onClick={toggleSelectMode}
+          className="inline-flex items-center gap-[7px] text-[13px] font-medium px-3 py-[7px] rounded-lg border transition-all shrink-0"
+          style={{
+            background: selectMode ? "var(--color-accent-soft)" : "var(--color-surface)",
+            borderColor: selectMode ? "var(--color-accent)" : "var(--color-border)",
+            color: selectMode ? "var(--color-accent-hover)" : "var(--color-ink-2)",
+            boxShadow: "0 1px 2px rgba(11,11,10,0.04)",
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          {selectMode ? "Cancel" : "Select"}
+        </button>
 
         <div className="flex items-center rounded-lg border p-0.5" style={{
           background: "var(--color-surface)",
@@ -475,45 +510,61 @@ export default function LibraryPage() {
       </div>
 
       {/* Bulk actions bar */}
-      {selectMode && selectedProjectIds.size > 0 && (
+      {selectMode && (
         <div className="flex items-center gap-2 mb-4 px-4 py-3 rounded-[12px] border" style={{
           background: "var(--color-surface)",
-          borderColor: "var(--color-accent)",
-          boxShadow: "0 0 0 2px var(--color-accent-ring)",
+          borderColor: selectedProjectIds.size > 0 ? "var(--color-accent)" : "var(--color-border)",
+          boxShadow: selectedProjectIds.size > 0 ? "0 0 0 2px var(--color-accent-ring)" : "none",
         }}>
-          <span className="text-[13px] font-medium mr-2" style={{ color: "var(--color-ink)" }}>
-            {selectedProjectIds.size} selected
-          </span>
-          <div className="h-4 w-px" style={{ background: "var(--color-border)" }} />
           <button
-            onClick={handleBulkDelete}
-            className="inline-flex items-center gap-1.5 text-[12.5px] font-medium px-3 py-[6px] rounded-[8px] border transition-all hover:bg-[var(--color-red-soft)]"
-            style={{ borderColor: "var(--color-border)", color: "var(--color-red)" }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-            Delete
-          </button>
-          <button
-            onClick={handleBulkExport}
-            disabled={bulkExporting}
-            className="inline-flex items-center gap-1.5 text-[12.5px] font-medium px-3 py-[6px] rounded-[8px] border transition-all disabled:opacity-40"
-            style={{ borderColor: "var(--color-border)", color: "var(--color-ink-2)" }}
-          >
-            {bulkExporting ? (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
-            ) : (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            )}
-            {bulkExporting ? "Exporting..." : "Export ZIP"}
-          </button>
-          <button
-            onClick={() => setShowAddToGroupModal(true)}
+            onClick={() => {
+              if (selectedProjectIds.size === filteredProjects.length) {
+                setSelectedProjectIds(new Set());
+              } else {
+                setSelectedProjectIds(new Set(filteredProjects.map((p) => p.id)));
+              }
+            }}
             className="inline-flex items-center gap-1.5 text-[12.5px] font-medium px-3 py-[6px] rounded-[8px] border transition-all"
             style={{ borderColor: "var(--color-border)", color: "var(--color-ink-2)" }}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-            Add to group
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            {selectedProjectIds.size === filteredProjects.length ? "Deselect all" : "Select all"}
           </button>
+          <span className="text-[13px] font-medium mr-2" style={{ color: "var(--color-ink)" }}>
+            {selectedProjectIds.size} selected
+          </span>
+          {selectedProjectIds.size > 0 && <div className="h-4 w-px" style={{ background: "var(--color-border)" }} />}
+          {selectedProjectIds.size > 0 && <>
+            <button
+              onClick={handleBulkDelete}
+              className="inline-flex items-center gap-1.5 text-[12.5px] font-medium px-3 py-[6px] rounded-[8px] border transition-all hover:bg-[var(--color-red-soft)]"
+              style={{ borderColor: "var(--color-border)", color: "var(--color-red)" }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+              Delete
+            </button>
+            <button
+              onClick={handleBulkExport}
+              disabled={bulkExporting}
+              className="inline-flex items-center gap-1.5 text-[12.5px] font-medium px-3 py-[6px] rounded-[8px] border transition-all disabled:opacity-40"
+              style={{ borderColor: "var(--color-border)", color: "var(--color-ink-2)" }}
+            >
+              {bulkExporting ? (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+              ) : (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              )}
+              {bulkExporting ? "Exporting..." : "Export ZIP"}
+            </button>
+            <button
+              onClick={() => setShowAddToGroupModal(true)}
+              className="inline-flex items-center gap-1.5 text-[12.5px] font-medium px-3 py-[6px] rounded-[8px] border transition-all"
+              style={{ borderColor: "var(--color-border)", color: "var(--color-ink-2)" }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              Add to group
+            </button>
+          </>}
         </div>
       )}
 
@@ -586,26 +637,91 @@ export default function LibraryPage() {
         /* Project grid / list */
         viewMode === "grid" ? (
         <div className="grid gap-3.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
-          {filteredProjects.map((p, i) => (
-            <ProjectCard
-              key={p.id}
-              id={p.id}
-              title={p.title}
-              gradient={gradients[i % gradients.length]}
-              variantInfo={`${p.variant_count} variations`}
-              ratio="9:16"
-              duration=""
-              timeAgo={timeAgo(p.created_at)}
-              sourceUrl={p.source_url}
-              mediaType={p.type === "image" ? "image" : "video"}
-              onDelete={handleDeleteProject}
-              onRename={handleRenameProject}
-              selectable={selectMode}
-              selected={selectedProjectIds.has(p.id)}
-              onToggleSelect={handleToggleSelect}
-            />
-          ))}
-          {filteredProjects.length === 0 && (
+          {gridItems.map((item, i) =>
+            item.kind === "unit" ? (
+              <ProjectCard
+                key={item.project.id}
+                id={item.project.id}
+                title={item.project.title}
+                gradient={gradients[i % gradients.length]}
+                variantInfo={`${item.project.variant_count} variations`}
+                ratio="9:16"
+                duration=""
+                timeAgo={timeAgo(item.project.created_at)}
+                sourceUrl={item.project.source_url}
+                mediaType={item.project.type === "image" ? "image" : "video"}
+                onDelete={handleDeleteProject}
+                onRename={handleRenameProject}
+                selectable={selectMode}
+                selected={selectedProjectIds.has(item.project.id)}
+                onToggleSelect={handleToggleSelect}
+              />
+            ) : (
+              /* Bulk card — single card representing multiple batch siblings */
+              <Link
+                key={`bulk-${item.batch_id}`}
+                href={`/library/${item.projects[0].id}`}
+                className="rounded-[14px] border overflow-hidden transition-all hover:shadow-md hover:-translate-y-0.5 group"
+                style={{
+                  background: "var(--color-surface)",
+                  borderColor: "var(--color-border-soft)",
+                }}
+              >
+                {/* Stacked thumbnails area */}
+                <div className="relative w-full overflow-hidden" style={{ aspectRatio: "9/16" }}>
+                  {/* Background */}
+                  <div className="absolute inset-0" style={{ background: "var(--color-surface-2)" }} />
+                  {/* Stacked source thumbnails */}
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    {item.projects.slice(0, 3).map((p, j) => (
+                      <div
+                        key={p.id}
+                        className="absolute rounded-[10px] overflow-hidden border shadow-lg"
+                        style={{
+                          width: "55%",
+                          aspectRatio: "9/16",
+                          top: `${18 + j * 6}%`,
+                          left: `${16 + j * 8}%`,
+                          zIndex: 3 - j,
+                          borderColor: "rgba(255,255,255,0.15)",
+                          transform: `rotate(${(j - 1) * 3}deg)`,
+                        }}
+                      >
+                        <div className="w-full h-full" style={{ background: gradients[(i + j + 1) % gradients.length] }}>
+                          {p.source_url && (
+                            p.type === "image" ? (
+                              <img src={p.source_url} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              <video src={`${p.source_url}#t=0.1`} muted playsInline preload="metadata" className="w-full h-full object-cover" />
+                            )
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* BULK badge */}
+                  <div className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wider uppercase" style={{
+                    background: "rgba(0,0,0,0.55)",
+                    backdropFilter: "blur(4px)",
+                    color: "#fff",
+                    letterSpacing: "0.06em",
+                  }}>
+                    Bulk · {item.projects.length}
+                  </div>
+                </div>
+                {/* Card footer */}
+                <div className="px-3 py-2.5">
+                  <div className="text-[13px] font-medium truncate" style={{ color: "var(--color-ink)" }}>
+                    Bulk · {item.projects.length} vidéo{item.projects.length !== 1 ? "s" : ""}
+                  </div>
+                  <div className="text-[11.5px] mt-0.5" style={{ color: "var(--color-muted)" }}>
+                    {item.projects.reduce((s, p) => s + p.variant_count, 0)} variations · {timeAgo(item.projects[0].created_at)}
+                  </div>
+                </div>
+              </Link>
+            )
+          )}
+          {gridItems.length === 0 && (
             <div className="col-span-full text-center py-12">
               <p className="text-[14px]" style={{ color: "var(--color-muted)" }}>No projects found</p>
               <Link href="/upload" className="text-[13px] font-medium mt-2 inline-block" style={{ color: "var(--color-accent)" }}>
@@ -626,72 +742,116 @@ export default function LibraryPage() {
             <span className="w-[80px] text-right">Created</span>
             <span className="w-7" />
           </div>
-          {filteredProjects.map((p, i) => (
+          {gridItems.map((item, i) =>
+            item.kind === "unit" ? (
             <div
-              key={p.id}
+              key={item.project.id}
               className="flex items-center gap-3 px-4 py-2.5 rounded-[10px] border transition-all duration-150 hover:-translate-y-0.5 hover:shadow-sm group"
               style={{
-                background: selectedProjectIds.has(p.id) ? "var(--color-accent-soft)" : "var(--color-surface)",
-                borderColor: selectedProjectIds.has(p.id) ? "var(--color-accent)" : "var(--color-border-soft)",
+                background: selectedProjectIds.has(item.project.id) ? "var(--color-accent-soft)" : "var(--color-surface)",
+                borderColor: selectedProjectIds.has(item.project.id) ? "var(--color-accent)" : "var(--color-border-soft)",
               }}
             >
-              {/* Select checkbox */}
               {selectMode && (
                 <button
-                  onClick={() => handleToggleSelect(p.id)}
+                  onClick={() => handleToggleSelect(item.project.id)}
                   className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-all"
                   style={{
-                    background: selectedProjectIds.has(p.id) ? "var(--color-accent)" : "var(--color-surface-2)",
-                    border: selectedProjectIds.has(p.id) ? "2px solid var(--color-accent)" : "2px solid var(--color-border)",
+                    background: selectedProjectIds.has(item.project.id) ? "var(--color-accent)" : "var(--color-surface-2)",
+                    border: selectedProjectIds.has(item.project.id) ? "2px solid var(--color-accent)" : "2px solid var(--color-border)",
                   }}
                 >
-                  {selectedProjectIds.has(p.id) && (
+                  {selectedProjectIds.has(item.project.id) && (
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
                   )}
                 </button>
               )}
-              {/* Thumbnail */}
-              <Link href={selectMode ? "#" : `/library/${p.id}`} className="w-10 h-10 rounded-[7px] overflow-hidden shrink-0 relative" style={{ background: gradients[i % gradients.length] }}>
-                {p.source_url && (
-                  p.type === "image" ? (
-                    <img src={p.source_url} alt="" className="absolute inset-0 w-full h-full object-cover" />
+              <Link href={selectMode ? "#" : `/library/${item.project.id}`} className="w-10 h-10 rounded-[7px] overflow-hidden shrink-0 relative" style={{ background: gradients[i % gradients.length] }}>
+                {item.project.source_url && (
+                  item.project.type === "image" ? (
+                    <img src={item.project.source_url} alt="" className="absolute inset-0 w-full h-full object-cover" />
                   ) : (
-                    <video src={`${p.source_url}#t=0.1`} muted playsInline preload="metadata" className="absolute inset-0 w-full h-full object-cover" />
+                    <video src={`${item.project.source_url}#t=0.1`} muted playsInline preload="metadata" className="absolute inset-0 w-full h-full object-cover" />
                   )
                 )}
               </Link>
-              {/* Title */}
-              <Link href={selectMode ? "#" : `/library/${p.id}`} className="flex-1 min-w-0 text-[13px] font-medium truncate" style={{ color: "var(--color-ink)" }}>
-                {p.title}
+              <Link href={selectMode ? "#" : `/library/${item.project.id}`} className="flex-1 min-w-0 text-[13px] font-medium truncate" style={{ color: "var(--color-ink)" }}>
+                {item.project.title}
               </Link>
-              {/* Type */}
               <span className="w-[80px] text-center text-[10.5px] font-medium px-[7px] py-[3px] rounded-full shrink-0" style={{
-                background: p.type === "image" ? "rgba(96,165,250,0.1)" : "var(--color-accent-soft)",
-                color: p.type === "image" ? "rgb(96,165,250)" : "var(--color-accent-hover)",
+                background: item.project.type === "image" ? "rgba(96,165,250,0.1)" : "var(--color-accent-soft)",
+                color: item.project.type === "image" ? "rgb(96,165,250)" : "var(--color-accent-hover)",
               }}>
-                {p.type === "image" ? "Photo" : "Video"}
+                {item.project.type === "image" ? "Photo" : "Video"}
               </span>
-              {/* Variations */}
               <span className="w-[90px] text-center text-[12px]" style={{ color: "var(--color-muted)" }}>
-                {p.variant_count} variant{p.variant_count !== 1 ? "s" : ""}
+                {item.project.variant_count} variant{item.project.variant_count !== 1 ? "s" : ""}
               </span>
-              {/* Date */}
               <span className="w-[80px] text-right text-[11px] shrink-0" style={{ color: "var(--color-muted-2)" }}>
-                {timeAgo(p.created_at)}
+                {timeAgo(item.project.created_at)}
               </span>
-              {/* Arrow */}
-              <Link href={selectMode ? "#" : `/library/${p.id}`}>
-                <svg
-                  width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
-                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                  style={{ color: "var(--color-muted)" }}
-                >
+              <Link href={selectMode ? "#" : `/library/${item.project.id}`}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: "var(--color-muted)" }}>
                   <polyline points="9 18 15 12 9 6"/>
                 </svg>
               </Link>
             </div>
-          ))}
-          {filteredProjects.length === 0 && (
+            ) : (
+            <Link
+              key={`bulk-${item.batch_id}`}
+              href={`/library/${item.projects[0].id}`}
+              className="flex items-center gap-3 px-4 py-2.5 rounded-[10px] border transition-all duration-150 hover:-translate-y-0.5 hover:shadow-sm group"
+              style={{
+                background: "var(--color-surface)",
+                borderColor: "var(--color-border-soft)",
+              }}
+            >
+              {/* Stacked thumbnails */}
+              <div className="relative w-10 h-10 shrink-0">
+                {item.projects.slice(0, 2).map((p, j) => (
+                  <div
+                    key={p.id}
+                    className="absolute rounded-[5px] overflow-hidden border"
+                    style={{
+                      width: 32, height: 32,
+                      top: j * 4, left: j * 5,
+                      zIndex: 2 - j,
+                      borderColor: "var(--color-border-soft)",
+                      background: gradients[(i + j) % gradients.length],
+                    }}
+                  >
+                    {p.source_url && (
+                      p.type === "image" ? (
+                        <img src={p.source_url} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <video src={`${p.source_url}#t=0.1`} muted playsInline preload="metadata" className="w-full h-full object-cover" />
+                      )
+                    )}
+                  </div>
+                ))}
+              </div>
+              <span className="flex-1 min-w-0 text-[13px] font-medium truncate" style={{ color: "var(--color-ink)" }}>
+                Bulk · {item.projects.length} vidéo{item.projects.length !== 1 ? "s" : ""}
+              </span>
+              <span className="w-[80px] text-center text-[10.5px] font-medium px-[7px] py-[3px] rounded-full shrink-0" style={{
+                background: "rgba(139,127,255,0.08)",
+                color: "var(--color-accent-hover)",
+              }}>
+                Bulk
+              </span>
+              <span className="w-[90px] text-center text-[12px]" style={{ color: "var(--color-muted)" }}>
+                {item.projects.reduce((s, p) => s + p.variant_count, 0)} variants
+              </span>
+              <span className="w-[80px] text-right text-[11px] shrink-0" style={{ color: "var(--color-muted-2)" }}>
+                {timeAgo(item.projects[0].created_at)}
+              </span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: "var(--color-muted)" }}>
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+            </Link>
+            )
+          )}
+          {gridItems.length === 0 && (
             <div className="text-center py-12">
               <p className="text-[14px]" style={{ color: "var(--color-muted)" }}>No projects found</p>
               <Link href="/upload" className="text-[13px] font-medium mt-2 inline-block" style={{ color: "var(--color-accent)" }}>
