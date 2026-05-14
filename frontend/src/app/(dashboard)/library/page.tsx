@@ -236,6 +236,22 @@ export default function LibraryPage() {
     });
   };
 
+  const handleToggleBulkSelect = (projectIds: string[]) => {
+    setSelectedProjectIds((prev) => {
+      const next = new Set(prev);
+      const allSelected = projectIds.every((id) => next.has(id));
+      if (allSelected) {
+        projectIds.forEach((id) => next.delete(id));
+      } else {
+        projectIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const isBulkSelected = (projectIds: string[]) =>
+    projectIds.length > 0 && projectIds.every((id) => selectedProjectIds.has(id));
+
   const handleBulkDelete = async () => {
     if (selectedProjectIds.size === 0) return;
     const ids = Array.from(selectedProjectIds);
@@ -658,15 +674,36 @@ export default function LibraryPage() {
               />
             ) : (
               /* Bulk card — single card representing multiple batch siblings */
-              <Link
+              <div
                 key={`bulk-${item.batch_id}`}
-                href={`/library/${item.projects[0].id}`}
-                className="rounded-[14px] border overflow-hidden transition-all hover:shadow-md hover:-translate-y-0.5 group"
+                className="rounded-[14px] border overflow-hidden transition-all hover:shadow-md hover:-translate-y-0.5 group relative cursor-pointer"
                 style={{
                   background: "var(--color-surface)",
-                  borderColor: "var(--color-border-soft)",
+                  borderColor: selectMode && isBulkSelected(item.projects.map(p => p.id)) ? "var(--color-accent)" : "var(--color-border-soft)",
+                  boxShadow: selectMode && isBulkSelected(item.projects.map(p => p.id)) ? "0 0 0 2px var(--color-accent-ring)" : "none",
+                }}
+                onClick={() => {
+                  if (selectMode) {
+                    handleToggleBulkSelect(item.projects.map(p => p.id));
+                  } else {
+                    window.location.href = `/library/${item.projects[0].id}`;
+                  }
                 }}
               >
+                {/* Selection checkbox */}
+                {selectMode && (
+                  <div className="absolute top-2.5 right-2.5 z-10">
+                    <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{
+                      background: isBulkSelected(item.projects.map(p => p.id)) ? "var(--color-accent)" : "rgba(0,0,0,0.4)",
+                      border: isBulkSelected(item.projects.map(p => p.id)) ? "2px solid var(--color-accent)" : "2px solid rgba(255,255,255,0.5)",
+                      backdropFilter: "blur(4px)",
+                    }}>
+                      {isBulkSelected(item.projects.map(p => p.id)) && (
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {/* Stacked thumbnails area */}
                 <div className="relative w-full overflow-hidden" style={{ aspectRatio: "9/16" }}>
                   {/* Background */}
@@ -718,7 +755,7 @@ export default function LibraryPage() {
                     {item.projects.reduce((s, p) => s + p.variant_count, 0)} variations · {timeAgo(item.projects[0].created_at)}
                   </div>
                 </div>
-              </Link>
+              </div>
             )
           )}
           {gridItems.length === 0 && (
@@ -797,15 +834,31 @@ export default function LibraryPage() {
               </Link>
             </div>
             ) : (
-            <Link
+            <div
               key={`bulk-${item.batch_id}`}
-              href={`/library/${item.projects[0].id}`}
-              className="flex items-center gap-3 px-4 py-2.5 rounded-[10px] border transition-all duration-150 hover:-translate-y-0.5 hover:shadow-sm group"
+              className="flex items-center gap-3 px-4 py-2.5 rounded-[10px] border transition-all duration-150 hover:-translate-y-0.5 hover:shadow-sm group cursor-pointer"
               style={{
-                background: "var(--color-surface)",
-                borderColor: "var(--color-border-soft)",
+                background: selectMode && isBulkSelected(item.projects.map(p => p.id)) ? "var(--color-accent-soft)" : "var(--color-surface)",
+                borderColor: selectMode && isBulkSelected(item.projects.map(p => p.id)) ? "var(--color-accent)" : "var(--color-border-soft)",
+              }}
+              onClick={() => {
+                if (selectMode) {
+                  handleToggleBulkSelect(item.projects.map(p => p.id));
+                } else {
+                  window.location.href = `/library/${item.projects[0].id}`;
+                }
               }}
             >
+              {selectMode && (
+                <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0" style={{
+                  background: isBulkSelected(item.projects.map(p => p.id)) ? "var(--color-accent)" : "var(--color-surface-2)",
+                  border: isBulkSelected(item.projects.map(p => p.id)) ? "2px solid var(--color-accent)" : "2px solid var(--color-border)",
+                }}>
+                  {isBulkSelected(item.projects.map(p => p.id)) && (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  )}
+                </div>
+              )}
               {/* Stacked thumbnails */}
               <div className="relative w-10 h-10 shrink-0">
                 {item.projects.slice(0, 2).map((p, j) => (
@@ -848,7 +901,7 @@ export default function LibraryPage() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: "var(--color-muted)" }}>
                 <polyline points="9 18 15 12 9 6"/>
               </svg>
-            </Link>
+            </div>
             )
           )}
           {gridItems.length === 0 && (

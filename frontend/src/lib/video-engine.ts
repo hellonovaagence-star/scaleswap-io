@@ -159,6 +159,7 @@ export interface CaptionOverlay {
   fontColor: string;
   strokeColor: string;
   fontFamily?: string;
+  textScale?: number;
 }
 
 /**
@@ -258,30 +259,29 @@ async function generateCaptionPng(
   outputPath: string,
 ): Promise<void> {
   // ── Scale from preview coordinates to video coordinates ──
-  // CaptionEditor.tsx preview: 200px wide (grid "1fr 200px"), font rendered at fontSize*0.35,
-  // textScale applied via CSS transform, saved as font_size = Math.round(fontSize * textScale).
-  // We must invert the 0.35 factor and scale to video width.
-  // ── Scale from preview coordinates to video coordinates ──
-  // Preview: 200px container, text rendered at fontSize*0.35, then scaled by textScale
-  // via CSS transform. Saved font_size = Math.round(fontSize * textScale).
-  // maxWidth in preview is 170px at the UN-SCALED level, but CSS transform: scale(textScale)
-  // stretches it visually to 170 * textScale pixels in preview space.
-  // We need to reproduce the same ratio at video resolution.
+  // CaptionEditor.tsx preview: 200px wide container, text rendered at fontSize*0.35
+  // in a 170px-wide block, then CSS transform: scale(textScale) zooms everything.
+  // We replicate the EXACT same approach: render at base font size (no textScale),
+  // use the same width ratio (170/200 = 85%), then apply scale(textScale) via CSS.
   const PREVIEW_WIDTH = 200;
+  const PREVIEW_TEXT_WIDTH = 170;
   const PREVIEW_FONT_SCALE = 0.35;
 
-  const rawSize = caption.fontSize || 48;
-  const scaleFactor = (videoWidth / PREVIEW_WIDTH) * PREVIEW_FONT_SCALE;
-  const size = Math.round(rawSize * scaleFactor);
+  const baseFontSize = caption.fontSize || 48; // base font_size from DB (without textScale)
+  const textScale = caption.textScale ?? 1;
+  const resolutionScale = videoWidth / PREVIEW_WIDTH;
+
+  // Font size matches preview: fontSize * 0.35 scaled to video resolution
+  const size = Math.round(baseFontSize * PREVIEW_FONT_SCALE * resolutionScale);
+  // Text wraps at 170px in preview → 170 * (videoWidth/200) in video
+  const maxTextWidth = Math.round(PREVIEW_TEXT_WIDTH * resolutionScale);
 
   const color = caption.fontColor || "white";
   const stroke = caption.strokeColor || "black";
+  const strokeEnabled = stroke !== "transparent";
   const text = caption.text || "";
-  const strokeWidth = Math.max(3, Math.round(size / 6));
-  // Use 90% of video width as max text width — matches the visual behavior in the preview
-  // where 170/200 = 85% base ratio is further stretched by textScale.
-  // Using a generous width prevents premature line breaks while still wrapping very long text.
-  const maxTextWidth = Math.round(videoWidth * 0.90);
+  // Stroke width: exactly 16% of font size, matching preview's previewFontSize * 0.16
+  const strokeWidth = Math.max(1, Math.round(size * 0.16));
 
   // Build @font-face + font-family based on caption.fontFamily
   let fontFaceBlock = "";
@@ -330,11 +330,18 @@ async function generateCaptionPng(
     overflow: hidden;
     position: relative;
   }
-  .caption {
+  .caption-anchor {
     position: absolute;
     top: ${yPercent}%;
     left: ${xPercent}%;
     transform: translate(-50%, -50%);
+    text-align: center;
+    width: ${maxTextWidth}px;
+  }
+  .caption {
+    display: inline-block;
+    transform: scale(${textScale});
+    transform-origin: center center;
     max-width: ${maxTextWidth}px;
     font-family: ${fontFamilyCss};
     font-size: ${size}px;
@@ -342,9 +349,9 @@ async function generateCaptionPng(
     color: ${color};
     text-align: center;
     line-height: 1.25;
-    paint-order: stroke fill;
+    ${strokeEnabled ? `paint-order: stroke fill;
     -webkit-text-stroke: ${strokeWidth}px ${stroke};
-    text-shadow: 0 ${Math.round(size * 0.03)}px ${Math.round(size * 0.05)}px rgba(0,0,0,0.35);
+    text-shadow: 0 ${Math.round(size * 0.03)}px ${Math.round(size * 0.05)}px rgba(0,0,0,0.35);` : ""}
     word-break: break-word;
     white-space: pre-wrap;
   }
@@ -357,7 +364,7 @@ async function generateCaptionPng(
     text-shadow: none;
   }
 </style></head><body>
-  <div class="caption">${captionHtml}</div>
+  <div class="caption-anchor"><div class="caption">${captionHtml}</div></div>
 </body></html>`;
 
   const browser = await getCaptionBrowser();

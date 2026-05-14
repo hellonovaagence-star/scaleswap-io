@@ -128,7 +128,8 @@ export async function POST(req: NextRequest) {
         captions = [{
           text: cap.text,
           position: cap.position || "bottom",
-          fontSize: Math.round((cap.font_size || 24) * (cap.text_scale || 1)),
+          fontSize: cap.font_size || 24,
+          textScale: cap.text_scale || 1,
           fontColor: cap.font_color || "white",
           strokeColor: cap.stroke_color || "black",
           fontFamily: cap.font_family || "tiktok",
@@ -149,7 +150,8 @@ export async function POST(req: NextRequest) {
           captions = caps.map((c) => ({
             text: c.text,
             position: c.position || "bottom",
-            fontSize: Math.round((c.font_size || 24) * (c.text_scale || 1)),
+            fontSize: c.font_size || 24,
+            textScale: c.text_scale || 1,
             fontColor: c.font_color || "white",
             strokeColor: c.stroke_color || "black",
             fontFamily: c.font_family || "tiktok",
