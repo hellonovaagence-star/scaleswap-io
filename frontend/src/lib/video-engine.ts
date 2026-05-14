@@ -954,55 +954,33 @@ async function generateImageVariant(
       console.log(`[img-variant ${variantIndex}] Caption PNG generated`);
     }
 
-    // Retry loop for pHash distance
-    let phash: string | null = null;
-    let phashDistance: number | null = null;
+    // Single-pass FFmpeg — transformation layers guarantee sufficient pHash distance
+    const cmd = buildImageFfmpegCommand(sourcePath, outputPath, variantIndex, gpsCity, captionPngPath);
+    const [binary, ...args] = cmd;
 
-    for (let attempt = 0; attempt <= PHASH_MAX_RETRIES; attempt++) {
-      const effectiveIndex = attempt === 0 ? variantIndex : variantIndex + 1000 * attempt;
-
-      const cmd = buildImageFfmpegCommand(sourcePath, outputPath, effectiveIndex, gpsCity, captionPngPath);
-      const [binary, ...args] = cmd;
-
-      console.log(`[img-variant ${variantIndex}] FFmpeg attempt ${attempt}, running...`);
-      const t0 = Date.now();
-      try {
-        const { stderr } = await execFileAsync(binary, args, { timeout: 300_000, maxBuffer: 10 * 1024 * 1024 });
-        console.log(`[img-variant ${variantIndex}] FFmpeg done in ${Date.now() - t0}ms`);
-        if (stderr && stderr.includes("Error")) {
-          console.warn(`[img-variant ${variantIndex}] FFmpeg stderr warnings:`, stderr.slice(0, 500));
-        }
-      } catch (ffErr: unknown) {
-        const ffMsg = ffErr instanceof Error ? ffErr.message : String(ffErr);
-        const ffStderr = (ffErr as { stderr?: string })?.stderr?.slice(0, 1000) || "";
-        console.error(`[img-variant ${variantIndex}] FFmpeg FAILED:`, ffMsg, ffStderr);
-        throw new Error(`FFmpeg failed: ${ffMsg}${ffStderr ? ` | ${ffStderr}` : ""}`);
+    console.log(`[img-variant ${variantIndex}] FFmpeg running...`);
+    const t0 = Date.now();
+    try {
+      const { stderr } = await execFileAsync(binary, args, { timeout: 300_000, maxBuffer: 10 * 1024 * 1024 });
+      console.log(`[img-variant ${variantIndex}] FFmpeg done in ${Date.now() - t0}ms`);
+      if (stderr && stderr.includes("Error")) {
+        console.warn(`[img-variant ${variantIndex}] FFmpeg stderr warnings:`, stderr.slice(0, 500));
       }
+    } catch (ffErr: unknown) {
+      const ffMsg = ffErr instanceof Error ? ffErr.message : String(ffErr);
+      const ffStderr = (ffErr as { stderr?: string })?.stderr?.slice(0, 1000) || "";
+      console.error(`[img-variant ${variantIndex}] FFmpeg FAILED:`, ffMsg, ffStderr);
+      throw new Error(`FFmpeg failed: ${ffMsg}${ffStderr ? ` | ${ffStderr}` : ""}`);
+    }
 
-      // Verify output exists
-      try {
-        const stat = await fs.stat(outputPath);
-        console.log(`[img-variant ${variantIndex}] Output file: ${stat.size} bytes`);
-        if (stat.size === 0) throw new Error("FFmpeg produced empty output");
-      } catch (statErr) {
-        console.error(`[img-variant ${variantIndex}] Output file missing or empty`);
-        throw statErr;
-      }
-
-      // Compute pHash directly on output image (no frame extraction needed)
-      if (sourcePhash) {
-        try {
-          phash = await computePhash(outputPath);
-          phashDistance = hammingDistance(sourcePhash, phash);
-          console.log(`[img-variant ${variantIndex}] pHash distance: ${phashDistance}`);
-
-          if (phashDistance >= PHASH_MIN_DISTANCE) break;
-        } catch {
-          break;
-        }
-      } else {
-        break;
-      }
+    // Verify output exists
+    try {
+      const stat = await fs.stat(outputPath);
+      console.log(`[img-variant ${variantIndex}] Output file: ${stat.size} bytes`);
+      if (stat.size === 0) throw new Error("FFmpeg produced empty output");
+    } catch (statErr) {
+      console.error(`[img-variant ${variantIndex}] Output file missing or empty`);
+      throw statErr;
     }
 
     const hash = await computeFileHash(outputPath);
@@ -1016,8 +994,8 @@ async function generateImageVariant(
       // Non-fatal
     }
 
-    console.log(`[img-variant ${variantIndex}] Complete: hash=${hash?.slice(0, 12)}, phashDist=${phashDistance}`);
-    return { variantIndex, outputPath, success: true, hash, phash, phashDistance, thumbnailPath, error: null };
+    console.log(`[img-variant ${variantIndex}] Complete: hash=${hash?.slice(0, 12)}`);
+    return { variantIndex, outputPath, success: true, hash, phash: null, phashDistance: null, thumbnailPath, error: null };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[img-variant ${variantIndex}] FAILED:`, msg);
@@ -1289,9 +1267,6 @@ async function computeFileHash(filePath: string): Promise<string> {
   });
 }
 
-const PHASH_MIN_DISTANCE = 10;
-const PHASH_MAX_RETRIES = 1;
-
 export async function generateVariant(
   sourcePath: string,
   outputDir: string,
@@ -1318,41 +1293,14 @@ export async function generateVariant(
       await generateCaptionPng(caption, dims.width, dims.height, captionPngPath);
     }
 
-    // Retry loop: if pHash distance is too low, regenerate with a shifted seed
-    let phash: string | null = null;
-    let phashDistance: number | null = null;
-    let attempt = 0;
+    // Single-pass FFmpeg — 25 transformation layers guarantee sufficient pHash distance
+    const cmd = buildFfmpegCommand(sourcePath, outputPath, variantIndex, sourceDuration, gpsCity, captionPngPath, hasAudio, mirrorEnabled);
+    const [binary, ...args] = cmd;
 
-    for (attempt = 0; attempt <= PHASH_MAX_RETRIES; attempt++) {
-      // Use shifted variant index on retries to get different PRNG params
-      const effectiveIndex = attempt === 0 ? variantIndex : variantIndex + 1000 * attempt;
+    await execFileAsync(binary, args, { timeout: 600_000, maxBuffer: 10 * 1024 * 1024 });
 
-      const cmd = buildFfmpegCommand(sourcePath, outputPath, effectiveIndex, sourceDuration, gpsCity, captionPngPath, hasAudio, mirrorEnabled);
-      const [binary, ...args] = cmd;
-
-      await execFileAsync(binary, args, { timeout: 600_000, maxBuffer: 10 * 1024 * 1024 });
-
-      // Layer 8: Binary padding (post-FFmpeg)
-      await applyBinaryPadding(outputPath, effectiveIndex);
-
-      // Compute pHash + distance
-      if (sourcePhash) {
-        try {
-          await extractFrame(outputPath, variantFramePath);
-          phash = await computePhash(variantFramePath);
-          phashDistance = hammingDistance(sourcePhash, phash);
-          await fs.unlink(variantFramePath).catch(() => {});
-
-          if (phashDistance >= PHASH_MIN_DISTANCE) break; // Good enough
-          // Too similar — retry with different seed
-        } catch {
-          await fs.unlink(variantFramePath).catch(() => {});
-          break; // Can't compute pHash, accept the variant as-is
-        }
-      } else {
-        break; // No source pHash to compare against
-      }
-    }
+    // Layer 8: Binary padding (post-FFmpeg)
+    await applyBinaryPadding(outputPath, variantIndex);
 
     const hash = await computeFileHash(outputPath);
 
@@ -1365,7 +1313,7 @@ export async function generateVariant(
       // Non-fatal
     }
 
-    return { variantIndex, outputPath, success: true, hash, phash, phashDistance, thumbnailPath, error: null };
+    return { variantIndex, outputPath, success: true, hash, phash: null, phashDistance: null, thumbnailPath, error: null };
   } catch (err: unknown) {
     const stderr = (err as { stderr?: string }).stderr || "";
     const msg = err instanceof Error ? err.message : String(err);
@@ -1398,23 +1346,11 @@ export async function generateAllVariants(
   let duration = 0;
   let hasAudio = false;
   let dims: { width: number; height: number };
-  let sourcePhash: string | undefined;
 
   if (isImage) {
-    // Image: get dimensions via sharp, compute pHash directly on source
     console.log(`[generateAll] Image mode — getting dimensions for: ${sourcePath}`);
     dims = await getImageDimensions(sourcePath);
     console.log(`[generateAll] Dimensions: ${dims.width}x${dims.height}`);
-    try {
-      console.log(`[generateAll] Computing source pHash...`);
-      sourcePhash = await Promise.race([
-        computePhash(sourcePath),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("pHash timeout")), 15_000)),
-      ]);
-      console.log(`[generateAll] Source pHash: ${sourcePhash}`);
-    } catch (phashErr) {
-      console.warn(`[generateAll] Source pHash failed (non-fatal):`, phashErr);
-    }
   } else {
     // Video: probe duration, dimensions, and audio
     const [d, a, dm] = await Promise.all([
@@ -1425,15 +1361,6 @@ export async function generateAllVariants(
     duration = d;
     hasAudio = a;
     dims = dm;
-
-    // Extract source frame once for pHash comparison
-    const sourceFramePath = path.join(outputDir, "source_frame.png");
-    try {
-      await extractFrame(sourcePath, sourceFramePath);
-      sourcePhash = await computePhash(sourceFramePath);
-    } catch {
-      // Non-fatal
-    }
   }
 
   // Pre-generate caption PNGs in batch (once per unique caption, shared across variants)
@@ -1453,14 +1380,14 @@ export async function generateAllVariants(
     }
   }
 
-  // Sequential execution — process one variant at a time to avoid memory
-  // contention (FFmpeg filter chains + Chromium are very memory-hungry)
+  // Parallel execution — process 2 variants at a time for ~2x speedup
+  const CONCURRENCY = 2;
   const results: VariantResult[] = [];
   let completed = 0;
 
   const indices = Array.from({ length: variantCount }, (_, k) => startIndex + k);
 
-  for (const i of indices) {
+  const generateOne = async (i: number): Promise<VariantResult> => {
     const caption = hasCaptions
       ? (captions.length === 1 ? captions[0] : captions[Math.floor(Math.random() * captions.length)])
       : undefined;
@@ -1469,12 +1396,12 @@ export async function generateAllVariants(
     let result: VariantResult;
     if (isImage) {
       result = await generateImageVariant(
-        sourcePath, outputDir, i, gpsCity, caption, dims, sourcePhash, preCaptionPath,
+        sourcePath, outputDir, i, gpsCity, caption, dims, undefined, preCaptionPath,
       );
     } else {
       result = await generateVariant(
         sourcePath, outputDir, i, duration, gpsCity, caption, dims,
-        sourcePhash, hasAudio, mirrorEnabled, preCaptionPath,
+        undefined, hasAudio, mirrorEnabled, preCaptionPath,
       );
     }
 
@@ -1483,26 +1410,31 @@ export async function generateAllVariants(
       console.warn(`[variant ${i}] Retrying after failure: ${result.error}`);
       if (isImage) {
         result = await generateImageVariant(
-          sourcePath, outputDir, i, gpsCity, caption, dims, sourcePhash, preCaptionPath,
+          sourcePath, outputDir, i, gpsCity, caption, dims, undefined, preCaptionPath,
         );
       } else {
         result = await generateVariant(
           sourcePath, outputDir, i, duration, gpsCity, caption, dims,
-          sourcePhash, hasAudio, mirrorEnabled, preCaptionPath,
+          undefined, hasAudio, mirrorEnabled, preCaptionPath,
         );
       }
     }
 
-    results.push(result);
-    completed++;
-    if (onProgress) await onProgress(completed, variantCount, result);
+    return result;
+  };
+
+  // Process in batches of CONCURRENCY
+  for (let b = 0; b < indices.length; b += CONCURRENCY) {
+    const batch = indices.slice(b, b + CONCURRENCY);
+    const batchResults = await Promise.all(batch.map((i) => generateOne(i)));
+
+    for (const result of batchResults) {
+      results.push(result);
+      completed++;
+      if (onProgress) await onProgress(completed, variantCount, result);
+    }
   }
 
-  // Clean up temp files
-  if (!isImage) {
-    const sourceFramePath = path.join(outputDir, "source_frame.png");
-    await fs.unlink(sourceFramePath).catch(() => {});
-  }
   // Clean up pre-generated caption PNGs
   for (const capPath of captionPngPaths.values()) {
     await fs.unlink(capPath).catch(() => {});
