@@ -495,12 +495,12 @@ function getNoiseFilter(rng: () => number): string {
 
 // ─── Layer 6: Codec variation + framerate shift ─────────────────────────────
 
-function getCodecArgs(rng: () => number, baseCrf: number = 18): string[] {
-  const crf = Math.max(16, Math.min(20, baseCrf + pick(rng, [0, 0, 0, 1])));
+function getCodecArgs(rng: () => number, baseCrf: number = 20): string[] {
+  const crf = Math.max(19, Math.min(22, baseCrf + pick(rng, [0, 0, 0, 1])));
   const gop = pick(rng, [24, 30, 48, 60, 72, 90, 120]);
   const profile = pick(rng, ["main", "high", "high"]);
   const level = pick(rng, ["4.0", "4.1", "4.2", "5.0", "5.1"]);
-  const preset = pick(rng, ["ultrafast", "veryfast", "veryfast"]);
+  const preset = pick(rng, ["fast", "fast", "veryfast"]);
   const bf = 1;
   const refs = 1;
   // Micro framerate variation — shifts which frames align with platform sampling points
@@ -523,7 +523,7 @@ function getCodecArgs(rng: () => number, baseCrf: number = 18): string[] {
 
 function getAudioArgs(rng: () => number): { args: string[]; sampleRate: number } {
   const sampleRate = pick(rng, [44100, 48000, 44100, 48000]);
-  const bitrate = pick(rng, ["128k", "160k", "192k", "224k", "256k"]);
+  const bitrate = pick(rng, ["96k", "112k", "128k", "128k"]);
   return {
     args: ["-c:a", "aac", "-ar", String(sampleRate), "-b:a", bitrate, "-ac", "2"],
     sampleRate,
