@@ -280,8 +280,8 @@ async function generateCaptionPng(
   const stroke = caption.strokeColor || "black";
   const strokeEnabled = stroke !== "transparent";
   const text = caption.text || "";
-  // Stroke width: exactly 16% of font size, matching preview's previewFontSize * 0.16
-  const strokeWidth = Math.max(1, Math.round(size * 0.16));
+  // Stroke width: ~3.5% of font size, matching TikTok's thin outline style
+  const strokeWidth = Math.max(1, Math.round(size * 0.035));
 
   // Build @font-face + font-family based on caption.fontFamily
   let fontFaceBlock = "";
@@ -289,7 +289,7 @@ async function generateCaptionPng(
 
   if (caption.fontFamily === "tiktok") {
     try {
-      const fontPath = path.join(process.cwd(), "public", "fonts", "TikTokSans_28pt-Bold.ttf");
+      const fontPath = path.join(process.cwd(), "public", "fonts", "TikTokSans-Bold.ttf");
       const fontBuffer = await fs.readFile(fontPath);
       const fontBase64 = fontBuffer.toString("base64");
       fontFaceBlock = `
@@ -351,7 +351,7 @@ async function generateCaptionPng(
     line-height: 1.25;
     ${strokeEnabled ? `paint-order: stroke fill;
     -webkit-text-stroke: ${strokeWidth}px ${stroke};
-    text-shadow: 0 ${Math.round(size * 0.03)}px ${Math.round(size * 0.05)}px rgba(0,0,0,0.35);` : ""}
+    text-shadow: 0 ${Math.round(size * 0.015)}px ${Math.round(size * 0.025)}px rgba(0,0,0,0.2);` : ""}
     word-break: break-word;
     white-space: pre-wrap;
   }
