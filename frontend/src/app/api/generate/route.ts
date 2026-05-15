@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { generateAllVariants, acquireBrowser, releaseBrowser, closeBrowser, type CaptionOverlay } from "@/lib/video-engine";
+import { acquireSlot, releaseSlot } from "@/lib/server-queue";
 import * as fs from "fs/promises";
 import { createWriteStream } from "fs";
 import * as path from "path";
@@ -95,6 +96,9 @@ export async function POST(req: NextRequest) {
   const sourceUrlPath = new URL(sourceUrl).pathname;
   const sourceExt = path.extname(sourceUrlPath) || (isImage ? ".jpg" : ".mp4");
   const sourcePath = path.join(tmpDir, `source${sourceExt}`);
+
+  // Wait for a concurrency slot (max 3 projects generating simultaneously)
+  await acquireSlot();
 
   // Register this project as using the shared Chrome browser
   acquireBrowser();
@@ -321,7 +325,7 @@ export async function POST(req: NextRequest) {
       .from("variants")
       .update({ status: "invalid" })
       .eq("project_id", projectId)
-      .or("status.eq.pending,status.eq.processing");
+      .in("status", ["pending", "processing"]);
 
     await supabase
       .from("projects")
@@ -331,6 +335,25 @@ export async function POST(req: NextRequest) {
     // Cleanup temp directory on error
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
 
+    // Best-effort cleanup of orphaned tmp dirs (> 1 hour old)
+    try {
+      const scaleswapTmp = path.join(os.tmpdir(), "scaleswap");
+      const entries = await fs.readdir(scaleswapTmp).catch(() => [] as string[]);
+      const now = Date.now();
+      for (const entry of entries) {
+        const entryPath = path.join(scaleswapTmp, entry);
+        const stat = await fs.stat(entryPath).catch(() => null);
+        if (stat && stat.isDirectory() && now - stat.mtimeMs > 60 * 60 * 1000) {
+          console.log(`[cleanup] Removing orphaned tmp dir: ${entry}`);
+          await fs.rm(entryPath, { recursive: true, force: true }).catch(() => {});
+        }
+      }
+    } catch {
+      // Non-fatal — best effort cleanup
+    }
+
     return NextResponse.json({ ok: false, error: "Generation failed" }, { status: 500 });
+  } finally {
+    releaseSlot();
   }
 }

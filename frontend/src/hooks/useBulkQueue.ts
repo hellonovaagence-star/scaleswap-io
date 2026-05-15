@@ -36,9 +36,11 @@ export function useBulkQueue() {
     const items = queueRef.current;
     const projectIds: string[] = [];
 
-    // Fire ALL generation requests at once (fire-and-forget)
-    // Server handles concurrency internally
+    // Fire generation requests with 200ms stagger to avoid overwhelming the server
+    // Server semaphore handles the real concurrency limiting
     for (let i = 0; i < items.length; i++) {
+      if (i > 0) await new Promise((r) => setTimeout(r, 200));
+
       const item = items[i];
       setQueue((prev) =>
         prev.map((q, j) => (j === i ? { ...q, status: "processing" } : q))
@@ -57,7 +59,7 @@ export function useBulkQueue() {
 
     // Poll DB for project status — source of truth
     if (projectIds.length > 0) {
-      const TIMEOUT = 15 * 60 * 1000;
+      const TIMEOUT = 30 * 60 * 1000;
       const POLL_INTERVAL = 3000;
       const startedAt = Date.now();
       const remaining = new Set(projectIds);

@@ -163,6 +163,11 @@ async function getCaptionBrowser(): Promise<Browser> {
   try {
     _browser = await _browserLaunchPromise;
     console.log("[caption] Chrome launched OK");
+    _browser.on("disconnected", () => {
+      console.warn("[browser] Chrome disconnected unexpectedly");
+      _browser = null;
+      _browserLaunchPromise = null;
+    });
   } catch (err) {
     console.error("[caption] Chrome launch failed:", err);
     _browserLaunchPromise = null;
@@ -1435,7 +1440,8 @@ export async function generateAllVariants(
         if (captionOk) {
           captionPngPaths.set(cap.text, capPath);
         } else {
-          throw new Error(`Caption PNG generation failed after 3 attempts for: "${cap.text.slice(0, 30)}"`);
+          console.error(`[generateAll] Caption failed for "${cap.text.slice(0, 30)}", continuing WITHOUT caption`);
+          // Don't throw — generate variants without caption overlay
         }
       }
     }
