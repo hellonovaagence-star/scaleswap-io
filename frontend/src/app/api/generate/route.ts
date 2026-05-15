@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { generateAllVariants, acquireBrowser, releaseBrowser, closeBrowser, type CaptionOverlay } from "@/lib/video-engine";
+import { generateAllVariants, acquireBrowser, releaseBrowser, closeBrowser, acquireGenerationSlot, releaseGenerationSlot, type CaptionOverlay } from "@/lib/video-engine";
 import * as fs from "fs/promises";
 import { createWriteStream } from "fs";
 import * as path from "path";
@@ -95,6 +95,9 @@ export async function POST(req: NextRequest) {
   const sourceUrlPath = new URL(sourceUrl).pathname;
   const sourceExt = path.extname(sourceUrlPath) || (isImage ? ".jpg" : ".mp4");
   const sourcePath = path.join(tmpDir, `source${sourceExt}`);
+
+  // Wait for a generation slot (max 2 projects at a time server-side)
+  await acquireGenerationSlot();
 
   // Register this project as using the shared Chrome browser
   acquireBrowser();
@@ -280,6 +283,7 @@ export async function POST(req: NextRequest) {
 
     // Release browser ref — Chrome closes only when all projects are done
     await releaseBrowser().catch(() => {});
+    releaseGenerationSlot();
 
     return NextResponse.json({
       ok: true,
@@ -292,6 +296,7 @@ export async function POST(req: NextRequest) {
     console.error("Generation failed:", err);
     console.error(`[generate] Fatal error:`, err);
     await releaseBrowser().catch(() => {});
+    releaseGenerationSlot();
     // Mark remaining pending/processing variants as invalid
     await supabase
       .from("variants")

@@ -35,46 +35,35 @@ export function useBulkQueue() {
 
     const items = queueRef.current;
 
-    // Fire generation requests with limited concurrency to avoid overwhelming the server
-    const API_CONCURRENCY = 2;
+    // Fire all generation requests (fire-and-forget) with small stagger
+    // Don't await HTTP responses — rely on DB polling for status
     const projectIds: string[] = [];
-
-    for (let b = 0; b < items.length; b += API_CONCURRENCY) {
-      if (abortRef.current) break;
-      const batch = items.slice(b, b + API_CONCURRENCY);
-
-      const fireResults = await Promise.allSettled(
-        batch.map(async (item) => {
-          const idx = items.indexOf(item);
-          setQueue((prev) =>
-            prev.map((q, i) => (i === idx ? { ...q, status: "processing" } : q))
-          );
-          const res = await fetch("/api/generate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(item.generatePayload),
-          });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return item.projectId;
-        })
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      setQueue((prev) =>
+        prev.map((q, j) => (j === i ? { ...q, status: "processing" } : q))
       );
 
-      fireResults.forEach((result, ri) => {
-        const idx = b + ri;
-        if (result.status === "fulfilled") {
-          projectIds.push(result.value);
-        } else {
-          setQueue((prev) =>
-            prev.map((q, i) => (i === idx ? { ...q, status: "error" } : q))
-          );
-        }
+      fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(item.generatePayload),
+      }).catch((err) => {
+        console.error(`[bulk] Fire failed for ${item.projectId}:`, err);
       });
+
+      projectIds.push(item.projectId);
+
+      // Small stagger between fires to spread server load
+      if (i < items.length - 1) {
+        await new Promise((r) => setTimeout(r, 500));
+      }
     }
 
-    // Unified polling — check ALL projects at once every 2s
+    // Poll DB for project status — this is the source of truth
     if (projectIds.length > 0) {
-      const TIMEOUT = 12 * 60 * 1000;
-      const POLL_INTERVAL = 2000;
+      const TIMEOUT = 15 * 60 * 1000; // 15 minutes
+      const POLL_INTERVAL = 3000;
       const startedAt = Date.now();
       const remaining = new Set(projectIds);
 

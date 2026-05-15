@@ -83,6 +83,35 @@ function randInt(rng: () => number, min: number, max: number): number {
   return Math.floor(uniform(rng, min, max + 1));
 }
 
+// ─── Server-side project concurrency limiter ─────────────────────────────────
+
+const MAX_CONCURRENT_PROJECTS = 2;
+let _activeProjects = 0;
+const _projectQueue: (() => void)[] = [];
+
+/** Wait for a generation slot (max 2 projects process at a time). */
+export async function acquireGenerationSlot(): Promise<void> {
+  if (_activeProjects < MAX_CONCURRENT_PROJECTS) {
+    _activeProjects++;
+    console.log(`[slot] Acquired (${_activeProjects}/${MAX_CONCURRENT_PROJECTS} active)`);
+    return;
+  }
+  console.log(`[slot] Waiting... (${_activeProjects}/${MAX_CONCURRENT_PROJECTS} active, ${_projectQueue.length} queued)`);
+  await new Promise<void>((resolve) => {
+    _projectQueue.push(resolve);
+  });
+  _activeProjects++;
+  console.log(`[slot] Acquired after wait (${_activeProjects}/${MAX_CONCURRENT_PROJECTS} active)`);
+}
+
+/** Release a generation slot so the next queued project can start. */
+export function releaseGenerationSlot(): void {
+  _activeProjects = Math.max(0, _activeProjects - 1);
+  const next = _projectQueue.shift();
+  if (next) next();
+  console.log(`[slot] Released (${_activeProjects}/${MAX_CONCURRENT_PROJECTS} active, ${_projectQueue.length} queued)`);
+}
+
 // ─── Caption overlay (HTML → PNG via Puppeteer, then FFmpeg overlay) ─────────
 
 import type { Browser } from "puppeteer-core";
