@@ -547,8 +547,6 @@ function getCodecArgs(rng: () => number, baseCrf: number = 20): string[] {
     "-bf", String(bf),
     "-refs", String(refs),
     "-r", fps,
-    // Force keyframe at time 0 so playback starts immediately
-    "-force_key_frames", "expr:gte(t,0)",
   ];
 }
 
