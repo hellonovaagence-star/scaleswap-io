@@ -34,7 +34,7 @@ export function useBulkQueue() {
     const supabase = createClient();
 
     const items = queueRef.current;
-    const CONCURRENCY = 3; // max 3 projects processing at once (3×2 FFmpeg = 6 processes)
+    const CONCURRENCY = 2; // max 2 projects processing at once (2×2 FFmpeg = 4 processes)
 
     let nextToFire = 0;
     const inFlight = new Set<string>();
