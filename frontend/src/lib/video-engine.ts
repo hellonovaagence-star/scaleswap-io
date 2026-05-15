@@ -91,16 +91,21 @@ let _browser: Browser | null = null;
 let _browserLaunchPromise: Promise<Browser> | null = null;
 let _browserRefCount = 0;
 
+// Mutex to serialize caption PNG generation (prevents Chrome overload)
+let _captionMutex: Promise<void> = Promise.resolve();
+
 /** Acquire a reference to the shared browser (call at start of generation). */
 export function acquireBrowser(): void {
   _browserRefCount++;
+  console.log(`[browser] Acquired ref (count=${_browserRefCount})`);
 }
 
 /** Release a reference and close Chrome only when no projects are using it. */
 export async function releaseBrowser(): Promise<void> {
   _browserRefCount = Math.max(0, _browserRefCount - 1);
+  console.log(`[browser] Released ref (count=${_browserRefCount})`);
   if (_browserRefCount === 0 && _browser) {
-    console.log("[caption] All projects done, closing Chrome");
+    console.log("[browser] All projects done, closing Chrome");
     await _browser.close().catch(() => {});
     _browser = null;
     _browserLaunchPromise = null;
@@ -109,10 +114,7 @@ export async function releaseBrowser(): Promise<void> {
 
 /** Force-close the shared Puppeteer browser instance (only for fatal errors). */
 export async function closeBrowser(): Promise<void> {
-  if (_browserRefCount > 0) {
-    // Other projects still using the browser — don't close
-    return;
-  }
+  if (_browserRefCount > 0) return;
   if (_browser) {
     await _browser.close().catch(() => {});
     _browser = null;
@@ -129,9 +131,7 @@ function resolveChromePath(): string {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const nodeFs = require("fs") as typeof import("fs");
   const candidates = [
-    // macOS
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    // Linux
     "/usr/bin/google-chrome-stable",
     "/usr/bin/google-chrome",
     "/usr/bin/chromium-browser",
@@ -140,7 +140,7 @@ function resolveChromePath(): string {
   for (const p of candidates) {
     if (nodeFs.existsSync(p)) return p;
   }
-  return candidates[0]; // fallback to macOS default
+  return candidates[0];
 }
 
 async function getCaptionBrowser(): Promise<Browser> {
@@ -150,25 +150,20 @@ async function getCaptionBrowser(): Promise<Browser> {
   if (_browser) {
     _browser.close().catch(() => {});
     _browser = null;
-    _browserLaunchPromise = null;
   }
-  // Prevent race: multiple concurrent calls must share the same launch promise
-  if (_browserLaunchPromise) {
-    try {
-      const b = await _browserLaunchPromise;
-      if (b.connected) return b;
-    } catch {
-      // Previous launch failed, try again below
-    }
-    _browserLaunchPromise = null;
-  }
+  _browserLaunchPromise = null;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const puppeteer = require("puppeteer-core") as typeof import("puppeteer-core");
   console.log("[caption] Launching headless Chrome...");
   _browserLaunchPromise = puppeteer.launch({
     executablePath: resolveChromePath(),
     headless: true,
-    args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--font-render-hinting=none"],
+    args: [
+      "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+      "--font-render-hinting=none", "--disable-extensions",
+      "--disable-background-networking", "--disable-sync",
+      "--js-flags=--max-old-space-size=256",
+    ],
   });
   try {
     _browser = await _browserLaunchPromise;
@@ -178,6 +173,7 @@ async function getCaptionBrowser(): Promise<Browser> {
     _browserLaunchPromise = null;
     throw err;
   }
+  _browserLaunchPromise = null;
   return _browser;
 }
 
@@ -396,14 +392,27 @@ async function generateCaptionPng(
   <div class="caption-anchor"><div class="caption">${captionHtml}</div></div>
 </body></html>`;
 
-  const browser = await getCaptionBrowser();
-  const page = await browser.newPage();
+  // Serialize Chrome access with mutex to prevent overload
+  let mutexRelease: () => void;
+  const waitForMutex = new Promise<void>((resolve) => {
+    mutexRelease = resolve;
+  });
+  const prevMutex = _captionMutex;
+  _captionMutex = waitForMutex;
+  await prevMutex;
+
   try {
-    await page.setViewport({ width: videoWidth, height: videoHeight, deviceScaleFactor: 1 });
-    await page.setContent(html, { waitUntil: "load" });
-    await page.screenshot({ path: outputPath, omitBackground: true, type: "png" });
+    const browser = await getCaptionBrowser();
+    const page = await browser.newPage();
+    try {
+      await page.setViewport({ width: videoWidth, height: videoHeight, deviceScaleFactor: 1 });
+      await page.setContent(html, { waitUntil: "load", timeout: 15_000 });
+      await page.screenshot({ path: outputPath, omitBackground: true, type: "png" });
+    } finally {
+      await page.close().catch(() => {});
+    }
   } finally {
-    await page.close();
+    mutexRelease!();
   }
 }
 
@@ -1444,7 +1453,7 @@ export async function generateAllVariants(
         if (captionOk) {
           captionPngPaths.set(cap.text, capPath);
         } else {
-          console.error(`[generateAll] Caption pre-gen failed after 3 attempts for: "${cap.text.slice(0, 30)}"`);
+          throw new Error(`Caption PNG generation failed after 3 attempts for: "${cap.text.slice(0, 30)}"`);
         }
       }
     }
