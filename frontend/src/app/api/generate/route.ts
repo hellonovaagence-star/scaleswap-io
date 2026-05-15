@@ -116,50 +116,74 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Build caption overlays from DB
+    // Build caption overlays from DB (with retry — queries can fail under concurrent load)
     let captions: CaptionOverlay[] | undefined;
     console.log("[generate] captionId:", captionId, "captionGroupId:", captionGroupId);
 
+    const CAPTION_QUERY_RETRIES = 3;
+
     if (captionId) {
-      const { data: cap } = await supabase
-        .from("captions")
-        .select("*")
-        .eq("id", captionId)
-        .single();
-      console.log("[generate] single caption data:", cap);
-      if (cap) {
-        captions = [{
-          text: cap.text,
-          position: cap.position || "bottom",
-          fontSize: cap.font_size || 24,
-          textScale: cap.text_scale || 1,
-          fontColor: cap.font_color || "white",
-          strokeColor: cap.stroke_color || "black",
-          fontFamily: cap.font_family || "tiktok",
-        }];
-      }
-    } else if (captionGroupId) {
-      const { data: members } = await supabase
-        .from("caption_group_members")
-        .select("caption_id")
-        .eq("group_id", captionGroupId);
-      if (members && members.length > 0) {
-        const captionIds = members.map((m) => m.caption_id);
-        const { data: caps } = await supabase
+      for (let attempt = 0; attempt < CAPTION_QUERY_RETRIES; attempt++) {
+        const { data: cap, error: capErr } = await supabase
           .from("captions")
           .select("*")
-          .in("id", captionIds);
-        if (caps && caps.length > 0) {
-          captions = caps.map((c) => ({
-            text: c.text,
-            position: c.position || "bottom",
-            fontSize: c.font_size || 24,
-            textScale: c.text_scale || 1,
-            fontColor: c.font_color || "white",
-            strokeColor: c.stroke_color || "black",
-            fontFamily: c.font_family || "tiktok",
-          }));
+          .eq("id", captionId)
+          .single();
+        if (capErr) {
+          console.warn(`[generate] Caption query attempt ${attempt} failed:`, capErr.message);
+          if (attempt < CAPTION_QUERY_RETRIES - 1) await new Promise((r) => setTimeout(r, 500));
+          continue;
         }
+        if (cap) {
+          captions = [{
+            text: cap.text,
+            position: cap.position || "bottom",
+            fontSize: cap.font_size || 24,
+            textScale: cap.text_scale || 1,
+            fontColor: cap.font_color || "white",
+            strokeColor: cap.stroke_color || "black",
+            fontFamily: cap.font_family || "tiktok",
+          }];
+          break;
+        }
+      }
+      // Fail if caption was requested but couldn't be loaded
+      if (!captions) {
+        throw new Error(`Caption ${captionId} could not be loaded after ${CAPTION_QUERY_RETRIES} attempts`);
+      }
+    } else if (captionGroupId) {
+      for (let attempt = 0; attempt < CAPTION_QUERY_RETRIES; attempt++) {
+        const { data: members, error: memErr } = await supabase
+          .from("caption_group_members")
+          .select("caption_id")
+          .eq("group_id", captionGroupId);
+        if (memErr) {
+          console.warn(`[generate] Caption group query attempt ${attempt} failed:`, memErr.message);
+          if (attempt < CAPTION_QUERY_RETRIES - 1) await new Promise((r) => setTimeout(r, 500));
+          continue;
+        }
+        if (members && members.length > 0) {
+          const captionIds = members.map((m) => m.caption_id);
+          const { data: caps } = await supabase
+            .from("captions")
+            .select("*")
+            .in("id", captionIds);
+          if (caps && caps.length > 0) {
+            captions = caps.map((c) => ({
+              text: c.text,
+              position: c.position || "bottom",
+              fontSize: c.font_size || 24,
+              textScale: c.text_scale || 1,
+              fontColor: c.font_color || "white",
+              strokeColor: c.stroke_color || "black",
+              fontFamily: c.font_family || "tiktok",
+            }));
+            break;
+          }
+        }
+      }
+      if (!captions) {
+        throw new Error(`Caption group ${captionGroupId} could not be loaded after ${CAPTION_QUERY_RETRIES} attempts`);
       }
     }
 
