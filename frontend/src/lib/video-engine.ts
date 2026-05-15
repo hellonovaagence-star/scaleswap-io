@@ -85,7 +85,7 @@ function randInt(rng: () => number, min: number, max: number): number {
 
 // ─── Server-side project concurrency limiter ─────────────────────────────────
 
-const MAX_CONCURRENT_PROJECTS = 2;
+const MAX_CONCURRENT_PROJECTS = 4;
 let _activeProjects = 0;
 const _projectQueue: (() => void)[] = [];
 
