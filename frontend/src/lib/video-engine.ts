@@ -91,9 +91,6 @@ let _browser: Browser | null = null;
 let _browserLaunchPromise: Promise<Browser> | null = null;
 let _browserRefCount = 0;
 
-// Mutex to serialize caption PNG generation (prevents Chrome overload)
-let _captionMutex: Promise<void> = Promise.resolve();
-
 /** Acquire a reference to the shared browser (call at start of generation). */
 export function acquireBrowser(): void {
   _browserRefCount++;
@@ -160,9 +157,7 @@ async function getCaptionBrowser(): Promise<Browser> {
     headless: true,
     args: [
       "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
-      "--font-render-hinting=none", "--disable-extensions",
-      "--disable-background-networking", "--disable-sync",
-      "--js-flags=--max-old-space-size=256",
+      "--font-render-hinting=none",
     ],
   });
   try {
@@ -392,27 +387,14 @@ async function generateCaptionPng(
   <div class="caption-anchor"><div class="caption">${captionHtml}</div></div>
 </body></html>`;
 
-  // Serialize Chrome access with mutex to prevent overload
-  let mutexRelease: () => void;
-  const waitForMutex = new Promise<void>((resolve) => {
-    mutexRelease = resolve;
-  });
-  const prevMutex = _captionMutex;
-  _captionMutex = waitForMutex;
-  await prevMutex;
-
+  const browser = await getCaptionBrowser();
+  const page = await browser.newPage();
   try {
-    const browser = await getCaptionBrowser();
-    const page = await browser.newPage();
-    try {
-      await page.setViewport({ width: videoWidth, height: videoHeight, deviceScaleFactor: 1 });
-      await page.setContent(html, { waitUntil: "load", timeout: 15_000 });
-      await page.screenshot({ path: outputPath, omitBackground: true, type: "png" });
-    } finally {
-      await page.close().catch(() => {});
-    }
+    await page.setViewport({ width: videoWidth, height: videoHeight, deviceScaleFactor: 1 });
+    await page.setContent(html, { waitUntil: "load", timeout: 15_000 });
+    await page.screenshot({ path: outputPath, omitBackground: true, type: "png" });
   } finally {
-    mutexRelease!();
+    await page.close().catch(() => {});
   }
 }
 
