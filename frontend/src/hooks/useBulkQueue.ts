@@ -34,16 +34,18 @@ export function useBulkQueue() {
     const supabase = createClient();
 
     const items = queueRef.current;
+    const CONCURRENCY = 5; // max 5 projects processing at once
 
-    // Fire all generation requests (fire-and-forget) with small stagger
-    // Don't await HTTP responses — rely on DB polling for status
-    const projectIds: string[] = [];
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
+    let nextToFire = 0;
+    const inFlight = new Set<string>();
+    const done = new Set<string>();
+
+    const fireProject = (idx: number) => {
+      const item = items[idx];
+      inFlight.add(item.projectId);
       setQueue((prev) =>
-        prev.map((q, j) => (j === i ? { ...q, status: "processing" } : q))
+        prev.map((q, i) => (i === idx ? { ...q, status: "processing" } : q))
       );
-
       fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -51,51 +53,61 @@ export function useBulkQueue() {
       }).catch((err) => {
         console.error(`[bulk] Fire failed for ${item.projectId}:`, err);
       });
+    };
 
-      projectIds.push(item.projectId);
-
-      // Small stagger between fires to spread server load
-      if (i < items.length - 1) {
-        await new Promise((r) => setTimeout(r, 500));
-      }
+    // Fire initial batch
+    while (nextToFire < items.length && inFlight.size < CONCURRENCY) {
+      fireProject(nextToFire++);
     }
 
-    // Poll DB for project status — this is the source of truth
-    if (projectIds.length > 0) {
-      const TIMEOUT = 15 * 60 * 1000; // 15 minutes
-      const POLL_INTERVAL = 3000;
-      const startedAt = Date.now();
-      const remaining = new Set(projectIds);
+    // Poll DB and auto-fill slots as projects complete
+    const TIMEOUT = 20 * 60 * 1000; // 20 minutes
+    const POLL_INTERVAL = 3000;
+    const startedAt = Date.now();
 
-      while (remaining.size > 0 && Date.now() - startedAt < TIMEOUT) {
-        if (abortRef.current) break;
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+    while (done.size < items.length && Date.now() - startedAt < TIMEOUT) {
+      if (abortRef.current) break;
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL));
 
-        const { data } = await supabase
-          .from("projects")
-          .select("id, status")
-          .in("id", Array.from(remaining));
+      // Poll all non-done projects
+      const checkIds = items
+        .filter((it) => !done.has(it.projectId))
+        .map((it) => it.projectId);
+      if (checkIds.length === 0) break;
 
-        if (data) {
-          for (const row of data) {
-            if (row.status !== "processing") {
-              remaining.delete(row.id);
-              const finalStatus = row.status === "ready" ? "ready" : "error";
-              setQueue((prev) =>
-                prev.map((q) =>
-                  q.projectId === row.id ? { ...q, status: finalStatus } : q
-                )
-              );
+      const { data } = await supabase
+        .from("projects")
+        .select("id, status")
+        .in("id", checkIds);
+
+      if (data) {
+        for (const row of data) {
+          if (row.status !== "processing" && !done.has(row.id)) {
+            done.add(row.id);
+            inFlight.delete(row.id);
+
+            const finalStatus = row.status === "ready" ? "ready" : "error";
+            setQueue((prev) =>
+              prev.map((q) =>
+                q.projectId === row.id ? { ...q, status: finalStatus } : q
+              )
+            );
+
+            // Auto-fill: fire next project to keep pipeline full
+            if (nextToFire < items.length) {
+              fireProject(nextToFire++);
             }
           }
         }
       }
+    }
 
-      // Timeout remaining items as error
-      if (remaining.size > 0) {
+    // Timeout remaining items as error
+    for (const item of items) {
+      if (!done.has(item.projectId)) {
         setQueue((prev) =>
           prev.map((q) =>
-            remaining.has(q.projectId) ? { ...q, status: "error" } : q
+            q.projectId === item.projectId ? { ...q, status: "error" } : q
           )
         );
       }
