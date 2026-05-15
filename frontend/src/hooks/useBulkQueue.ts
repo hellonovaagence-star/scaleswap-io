@@ -35,33 +35,41 @@ export function useBulkQueue() {
 
     const items = queueRef.current;
 
-    // Fire ALL generation requests in parallel (non-blocking)
+    // Fire generation requests with limited concurrency to avoid overwhelming the server
+    const API_CONCURRENCY = 2;
     const projectIds: string[] = [];
-    const fireResults = await Promise.allSettled(
-      items.map(async (item, idx) => {
-        setQueue((prev) =>
-          prev.map((q, i) => (i === idx ? { ...q, status: "processing" } : q))
-        );
-        const res = await fetch("/api/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(item.generatePayload),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return item.projectId;
-      })
-    );
 
-    // Mark failed fires as error, collect successful project IDs
-    fireResults.forEach((result, idx) => {
-      if (result.status === "fulfilled") {
-        projectIds.push(result.value);
-      } else {
-        setQueue((prev) =>
-          prev.map((q, i) => (i === idx ? { ...q, status: "error" } : q))
-        );
-      }
-    });
+    for (let b = 0; b < items.length; b += API_CONCURRENCY) {
+      if (abortRef.current) break;
+      const batch = items.slice(b, b + API_CONCURRENCY);
+
+      const fireResults = await Promise.allSettled(
+        batch.map(async (item) => {
+          const idx = items.indexOf(item);
+          setQueue((prev) =>
+            prev.map((q, i) => (i === idx ? { ...q, status: "processing" } : q))
+          );
+          const res = await fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(item.generatePayload),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return item.projectId;
+        })
+      );
+
+      fireResults.forEach((result, ri) => {
+        const idx = b + ri;
+        if (result.status === "fulfilled") {
+          projectIds.push(result.value);
+        } else {
+          setQueue((prev) =>
+            prev.map((q, i) => (i === idx ? { ...q, status: "error" } : q))
+          );
+        }
+      });
+    }
 
     // Unified polling — check ALL projects at once every 2s
     if (projectIds.length > 0) {

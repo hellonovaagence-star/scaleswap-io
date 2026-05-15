@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { generateAllVariants, closeBrowser, type CaptionOverlay } from "@/lib/video-engine";
+import { generateAllVariants, acquireBrowser, releaseBrowser, closeBrowser, type CaptionOverlay } from "@/lib/video-engine";
 import * as fs from "fs/promises";
 import { createWriteStream } from "fs";
 import * as path from "path";
@@ -95,6 +95,9 @@ export async function POST(req: NextRequest) {
   const sourceUrlPath = new URL(sourceUrl).pathname;
   const sourceExt = path.extname(sourceUrlPath) || (isImage ? ".jpg" : ".mp4");
   const sourcePath = path.join(tmpDir, `source${sourceExt}`);
+
+  // Register this project as using the shared Chrome browser
+  acquireBrowser();
 
   try {
     // Download source video (only if not already cached from previous batch)
@@ -275,8 +278,8 @@ export async function POST(req: NextRequest) {
       await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
 
-    // Close shared Puppeteer browser to prevent zombie Chrome processes
-    await closeBrowser().catch(() => {});
+    // Release browser ref — Chrome closes only when all projects are done
+    await releaseBrowser().catch(() => {});
 
     return NextResponse.json({
       ok: true,
@@ -288,7 +291,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("Generation failed:", err);
     console.error(`[generate] Fatal error:`, err);
-    await closeBrowser().catch(() => {});
+    await releaseBrowser().catch(() => {});
     // Mark remaining pending/processing variants as invalid
     await supabase
       .from("variants")

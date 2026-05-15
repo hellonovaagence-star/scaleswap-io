@@ -89,9 +89,30 @@ import type { Browser } from "puppeteer-core";
 
 let _browser: Browser | null = null;
 let _browserLaunchPromise: Promise<Browser> | null = null;
+let _browserRefCount = 0;
 
-/** Close the shared Puppeteer browser instance (call on shutdown). */
+/** Acquire a reference to the shared browser (call at start of generation). */
+export function acquireBrowser(): void {
+  _browserRefCount++;
+}
+
+/** Release a reference and close Chrome only when no projects are using it. */
+export async function releaseBrowser(): Promise<void> {
+  _browserRefCount = Math.max(0, _browserRefCount - 1);
+  if (_browserRefCount === 0 && _browser) {
+    console.log("[caption] All projects done, closing Chrome");
+    await _browser.close().catch(() => {});
+    _browser = null;
+    _browserLaunchPromise = null;
+  }
+}
+
+/** Force-close the shared Puppeteer browser instance (only for fatal errors). */
 export async function closeBrowser(): Promise<void> {
+  if (_browserRefCount > 0) {
+    // Other projects still using the browser — don't close
+    return;
+  }
   if (_browser) {
     await _browser.close().catch(() => {});
     _browser = null;
@@ -129,9 +150,18 @@ async function getCaptionBrowser(): Promise<Browser> {
   if (_browser) {
     _browser.close().catch(() => {});
     _browser = null;
+    _browserLaunchPromise = null;
   }
   // Prevent race: multiple concurrent calls must share the same launch promise
-  if (_browserLaunchPromise) return _browserLaunchPromise;
+  if (_browserLaunchPromise) {
+    try {
+      const b = await _browserLaunchPromise;
+      if (b.connected) return b;
+    } catch {
+      // Previous launch failed, try again below
+    }
+    _browserLaunchPromise = null;
+  }
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const puppeteer = require("puppeteer-core") as typeof import("puppeteer-core");
   console.log("[caption] Launching headless Chrome...");
@@ -148,7 +178,6 @@ async function getCaptionBrowser(): Promise<Browser> {
     _browserLaunchPromise = null;
     throw err;
   }
-  _browserLaunchPromise = null;
   return _browser;
 }
 
@@ -453,7 +482,9 @@ function getTemporalFilters(rng: () => number): { video: string; audio: string }
   const speedFactor = 1.0 + uniform(rng, -0.005, 0.005);
   const ptsFactor = 1.0 / speedFactor;
   return {
-    video: `setpts=${ptsFactor.toFixed(6)}*PTS`,
+    // PTS-STARTPTS resets timestamps to 0 after -ss input seeking
+    // Without this, frames keep their original PTS causing frozen first frame
+    video: `setpts=${ptsFactor.toFixed(6)}*(PTS-STARTPTS)`,
     audio: `atempo=${speedFactor.toFixed(6)}`,
   };
 }
@@ -497,7 +528,7 @@ function getNoiseFilter(rng: () => number): string {
 
 function getCodecArgs(rng: () => number, baseCrf: number = 20): string[] {
   const crf = Math.max(19, Math.min(22, baseCrf + pick(rng, [0, 0, 0, 1])));
-  const gop = pick(rng, [24, 30, 48, 60, 72, 90, 120]);
+  const gop = pick(rng, [24, 30, 48, 60]);
   const profile = pick(rng, ["main", "high", "high"]);
   const level = pick(rng, ["4.0", "4.1", "4.2", "5.0", "5.1"]);
   const preset = pick(rng, ["fast", "fast", "veryfast"]);
@@ -516,6 +547,8 @@ function getCodecArgs(rng: () => number, baseCrf: number = 20): string[] {
     "-bf", String(bf),
     "-refs", String(refs),
     "-r", fps,
+    // Force keyframe at time 0 so playback starts immediately
+    "-force_key_frames", "expr:gte(t,0)",
   ];
 }
 
@@ -1397,8 +1430,24 @@ export async function generateAllVariants(
       const cap = uniqueCaptions[ci];
       if (cap.text.trim()) {
         const capPath = path.join(outputDir, `caption_pre_${ci}.png`);
-        await generateCaptionPng(cap, dims.width, dims.height, capPath);
-        captionPngPaths.set(cap.text, capPath);
+        // Retry caption generation up to 3 times (Chrome can crash under load)
+        let captionOk = false;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            await generateCaptionPng(cap, dims.width, dims.height, capPath);
+            captionOk = true;
+            break;
+          } catch (captionErr) {
+            console.warn(`[generateAll] Caption pre-gen attempt ${attempt} failed:`, captionErr);
+            // Wait briefly before retry to let Chrome recover
+            await new Promise((r) => setTimeout(r, 500));
+          }
+        }
+        if (captionOk) {
+          captionPngPaths.set(cap.text, capPath);
+        } else {
+          console.error(`[generateAll] Caption pre-gen failed after 3 attempts for: "${cap.text.slice(0, 30)}"`);
+        }
       }
     }
   }
