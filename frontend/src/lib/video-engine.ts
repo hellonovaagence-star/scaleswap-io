@@ -404,10 +404,13 @@ async function generateCaptionPng(
 </body></html>`;
 
   const browser = await getCaptionBrowser();
+  if (!browser || !browser.connected) {
+    throw new Error("Chrome browser not available");
+  }
   const page = await browser.newPage();
   try {
     await page.setViewport({ width: videoWidth, height: videoHeight, deviceScaleFactor: 1 });
-    await page.setContent(html, { waitUntil: "load", timeout: 15_000 });
+    await page.setContent(html, { waitUntil: "load", timeout: 10_000 });
     await page.screenshot({ path: outputPath, omitBackground: true, type: "png" });
   } finally {
     await page.close().catch(() => {});
@@ -1459,7 +1462,8 @@ export async function generateAllVariants(
         if (captionOk) {
           captionPngPaths.set(cap.text, capPath);
         } else {
-          throw new Error(`Caption PNG generation failed after 4 attempts for: "${cap.text.slice(0, 30)}"`);
+          // Non-fatal: proceed without captions instead of killing the entire project
+          console.error(`[generateAll] Caption failed after 4 attempts for: "${cap.text.slice(0, 30)}" — continuing WITHOUT captions`);
         }
       }
     }
@@ -1495,10 +1499,11 @@ export async function generateAllVariants(
     const batch = indices.slice(b, b + CONCURRENCY);
     const batchResults = await Promise.all(batch.map((i) => generateOne(i)));
 
-    // Retry any failures sequentially (avoids resource contention on retry)
+    // Retry any failures sequentially with a brief cooldown
     for (let r = 0; r < batchResults.length; r++) {
       if (!batchResults[r].success) {
-        console.warn(`[variant ${batch[r]}] Parallel attempt failed, retrying sequentially...`);
+        console.warn(`[variant ${batch[r]}] Parallel attempt failed, retrying sequentially after cooldown...`);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
         batchResults[r] = await generateOne(batch[r]);
       }
     }
