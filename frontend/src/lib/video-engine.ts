@@ -143,12 +143,23 @@ function resolveChromePath(): string {
 async function getCaptionBrowser(): Promise<Browser> {
   // Reuse healthy existing browser
   if (_browser && _browser.connected) return _browser;
+
+  // If another call is already launching Chrome, wait for that launch
+  if (_browserLaunchPromise) {
+    try {
+      const browser = await _browserLaunchPromise;
+      if (browser && browser.connected) return browser;
+    } catch {
+      // Previous launch failed — fall through to our own launch below
+    }
+  }
+
   // Clean up dead browser reference
   if (_browser) {
     _browser.close().catch(() => {});
     _browser = null;
   }
-  _browserLaunchPromise = null;
+
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const puppeteer = require("puppeteer-core") as typeof import("puppeteer-core");
   console.log("[caption] Launching headless Chrome...");
@@ -375,8 +386,8 @@ async function generateCaptionPng(
     text-align: center;
     line-height: 1.25;
     ${strokeEnabled ? `paint-order: stroke fill;
-    -webkit-text-stroke: ${strokeWidth}px ${stroke};
-    text-shadow: 0 ${Math.round(size * 0.015)}px ${Math.round(size * 0.025)}px rgba(0,0,0,0.2);` : ""}
+    -webkit-text-stroke: ${strokeWidth}px ${stroke};` : ""}
+    text-shadow: 0 ${Math.round(size * 0.04)}px ${Math.round(size * 0.06)}px rgba(0,0,0,0.45);
     word-break: break-word;
     white-space: pre-wrap;
   }
@@ -1424,24 +1435,31 @@ export async function generateAllVariants(
       const cap = uniqueCaptions[ci];
       if (cap.text.trim()) {
         const capPath = path.join(outputDir, `caption_pre_${ci}.png`);
-        // Retry caption generation up to 3 times (Chrome can crash under load)
+        // Retry caption generation up to 3 times, then force-restart Chrome and try once more
         let captionOk = false;
-        for (let attempt = 0; attempt < 3; attempt++) {
+        for (let attempt = 0; attempt < 4; attempt++) {
           try {
             await generateCaptionPng(cap, dims.width, dims.height, capPath);
             captionOk = true;
             break;
           } catch (captionErr) {
             console.warn(`[generateAll] Caption pre-gen attempt ${attempt} failed:`, captionErr);
-            // Wait briefly before retry to let Chrome recover
+            if (attempt === 2) {
+              // After 3 failures, force-restart Chrome before final attempt
+              console.warn("[generateAll] Force-restarting Chrome for final caption attempt...");
+              if (_browser) {
+                _browser.close().catch(() => {});
+                _browser = null;
+                _browserLaunchPromise = null;
+              }
+            }
             await new Promise((r) => setTimeout(r, 500));
           }
         }
         if (captionOk) {
           captionPngPaths.set(cap.text, capPath);
         } else {
-          console.error(`[generateAll] Caption failed for "${cap.text.slice(0, 30)}", continuing WITHOUT caption`);
-          // Don't throw — generate variants without caption overlay
+          throw new Error(`Caption PNG generation failed after 4 attempts for: "${cap.text.slice(0, 30)}"`);
         }
       }
     }
