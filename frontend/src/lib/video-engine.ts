@@ -1462,15 +1462,14 @@ export async function generateAllVariants(
         if (captionOk) {
           captionPngPaths.set(cap.text, capPath);
         } else {
-          // Non-fatal: proceed without captions instead of killing the entire project
-          console.error(`[generateAll] Caption failed after 4 attempts for: "${cap.text.slice(0, 30)}" — continuing WITHOUT captions`);
+          throw new Error(`Caption PNG generation failed after 4 attempts for: "${cap.text.slice(0, 30)}"`);
         }
       }
     }
   }
 
-  // Parallel execution — process 2 variants at a time for ~2x speedup
-  const CONCURRENCY = 2;
+  // Sequential execution — process 1 variant at a time to avoid Chrome/FFmpeg crashes
+  const CONCURRENCY = 1;
   const results: VariantResult[] = [];
   let completed = 0;
 

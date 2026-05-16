@@ -4,7 +4,7 @@
  * request stays alive while awaiting its slot).
  */
 
-const MAX_CONCURRENT = 2;
+const MAX_CONCURRENT = 1;
 let running = 0;
 const waiting: (() => void)[] = [];
 
