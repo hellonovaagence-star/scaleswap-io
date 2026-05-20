@@ -1,5 +1,5 @@
 # --- Stage 1: Build ---
-FROM node:20-alpine AS builder
+FROM node:20-alpine3.21 AS builder
 
 WORKDIR /app
 
@@ -24,9 +24,11 @@ RUN printf "NEXT_PUBLIC_SUPABASE_URL=%s\nNEXT_PUBLIC_SUPABASE_ANON_KEY=%s\n" \
 RUN npm run build
 
 # --- Stage 2: Runtime ---
-FROM node:20-alpine
+FROM node:20-alpine3.21
 
-# Install FFmpeg + Chromium (emojis rendered via CDN images, no local font needed)
+# Install FFmpeg + Chromium
+# PINNED to Alpine 3.21 → FFmpeg 7.x. Alpine 3.23 ships FFmpeg 8.0 which breaks
+# libx264 encoder initialization with our filter_complex pipeline.
 RUN apk add --no-cache ffmpeg chromium
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
