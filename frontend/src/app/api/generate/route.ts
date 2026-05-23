@@ -302,6 +302,14 @@ export async function POST(req: NextRequest) {
         .update({ status: (count ?? 0) > 0 ? "ready" : "error" })
         .eq("id", projectId);
 
+      // Delete source file from Supabase storage (no longer needed after generation)
+      const sourceMarker = "/storage/v1/object/public/videos/";
+      const sourceIdx = sourceUrl.indexOf(sourceMarker);
+      if (sourceIdx !== -1) {
+        const sourceStoragePath = sourceUrl.substring(sourceIdx + sourceMarker.length);
+        await supabase.storage.from("videos").remove([sourceStoragePath]).catch(() => {});
+      }
+
       // Only cleanup temp directory on the last batch (prevents race condition)
       await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }

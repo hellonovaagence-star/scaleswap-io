@@ -86,10 +86,23 @@ function randInt(rng: () => number, min: number, max: number): number {
 // ─── Caption overlay (HTML → PNG via Puppeteer, then FFmpeg overlay) ─────────
 
 import type { Browser } from "puppeteer-core";
+import { execSync } from "child_process";
 
 let _browser: Browser | null = null;
 let _browserLaunchPromise: Promise<Browser> | null = null;
 let _browserRefCount = 0;
+
+/** Kill all orphaned Chromium processes to prevent PID/thread exhaustion. */
+function killOrphanChrome(): void {
+  try {
+    execSync("pkill -9 -f chromium || true", { stdio: "ignore", timeout: 5000 });
+    // Wait briefly for processes to die
+    execSync("sleep 0.3", { stdio: "ignore", timeout: 2000 });
+    console.log("[browser] Killed orphan Chromium processes");
+  } catch {
+    // Ignore — no chromium processes running
+  }
+}
 
 /** Acquire a reference to the shared browser (call at start of generation). */
 export function acquireBrowser(): void {
@@ -154,11 +167,12 @@ async function getCaptionBrowser(): Promise<Browser> {
     }
   }
 
-  // Clean up dead browser reference
+  // Clean up dead browser reference AND orphan processes
   if (_browser) {
     _browser.close().catch(() => {});
     _browser = null;
   }
+  killOrphanChrome();
 
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const puppeteer = require("puppeteer-core") as typeof import("puppeteer-core");
@@ -169,6 +183,12 @@ async function getCaptionBrowser(): Promise<Browser> {
     args: [
       "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
       "--font-render-hinting=none",
+      "--disable-extensions",
+      "--disable-background-networking",
+      "--disable-default-apps",
+      "--disable-translate",
+      "--single-process",
+      "--no-zygote",
     ],
   });
   try {
@@ -178,6 +198,7 @@ async function getCaptionBrowser(): Promise<Browser> {
       console.warn("[browser] Chrome disconnected unexpectedly");
       _browser = null;
       _browserLaunchPromise = null;
+      killOrphanChrome();
     });
   } catch (err) {
     console.error("[caption] Chrome launch failed:", err);
@@ -1455,6 +1476,7 @@ export async function generateAllVariants(
                 _browser = null;
                 _browserLaunchPromise = null;
               }
+              killOrphanChrome();
             }
             await new Promise((r) => setTimeout(r, 500));
           }
