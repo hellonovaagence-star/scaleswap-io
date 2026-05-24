@@ -26,13 +26,15 @@ RUN npm run build
 # --- Stage 2: Runtime ---
 FROM node:20-alpine3.21
 
-# Install FFmpeg + Chromium
+# Install FFmpeg + Chromium + deps for multi-process Chrome
 # PINNED to Alpine 3.21 → FFmpeg 7.x. Alpine 3.23 ships FFmpeg 8.0 which breaks
 # libx264 encoder initialization with our filter_complex pipeline.
-RUN apk add --no-cache ffmpeg chromium
+RUN apk add --no-cache ffmpeg chromium nss freetype harfbuzz ca-certificates ttf-freefont
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV CHROME_PATH=/usr/bin/chromium-browser
+# Ensure Chrome has enough shared memory (fallback via --disable-dev-shm-usage)
+ENV CHROMIUM_FLAGS="--disable-dev-shm-usage"
 
 # Supabase env vars needed at runtime for middleware & API routes
 ARG NEXT_PUBLIC_SUPABASE_URL

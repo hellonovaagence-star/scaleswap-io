@@ -177,20 +177,29 @@ async function getCaptionBrowser(): Promise<Browser> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const puppeteer = require("puppeteer-core") as typeof import("puppeteer-core");
   console.log("[caption] Launching headless Chrome...");
-  _browserLaunchPromise = puppeteer.launch({
-    executablePath: resolveChromePath(),
-    headless: true,
-    args: [
-      "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
-      "--font-render-hinting=none",
-      "--disable-extensions",
-      "--disable-background-networking",
-      "--disable-default-apps",
-      "--disable-translate",
-      "--single-process",
-      "--no-zygote",
-    ],
-  });
+
+  // Wrap launch in a timeout to prevent infinite hangs that deadlock the queue
+  const LAUNCH_TIMEOUT = 30_000;
+  _browserLaunchPromise = Promise.race([
+    puppeteer.launch({
+      executablePath: resolveChromePath(),
+      headless: true,
+      args: [
+        "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+        "--disable-setuid-sandbox",
+        "--font-render-hinting=none",
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--disable-default-apps",
+        "--disable-translate",
+        // Removed --single-process and --no-zygote: they cause Target closed
+        // errors with newer Chromium versions in Alpine containers
+      ],
+    }),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Chrome launch timed out after 30s")), LAUNCH_TIMEOUT)
+    ),
+  ]);
   try {
     _browser = await _browserLaunchPromise;
     console.log("[caption] Chrome launched OK");
@@ -203,6 +212,7 @@ async function getCaptionBrowser(): Promise<Browser> {
   } catch (err) {
     console.error("[caption] Chrome launch failed:", err);
     _browserLaunchPromise = null;
+    killOrphanChrome();
     throw err;
   }
   _browserLaunchPromise = null;
