@@ -329,6 +329,9 @@ export async function POST(req: NextRequest) {
     // Release browser ref — Chrome closes only when all projects are done
     await releaseBrowser().catch(() => {});
 
+    // Auto-drain: after finishing, trigger next pending project for this user (fire-and-forget)
+    triggerNextPending(supabase, user.id, req).catch(() => {});
+
     return NextResponse.json({
       ok: true,
       completed: completedCount,
@@ -375,5 +378,53 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Generation failed" }, { status: 500 });
   } finally {
     releaseSlot();
+    // Auto-drain: trigger next pending project even after errors
+    triggerNextPending(supabase, user.id, req).catch(() => {});
   }
+}
+
+// ─── Auto-drain: pick up next pending project after each generation ─────────
+
+async function triggerNextPending(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  req: NextRequest,
+): Promise<void> {
+  // Find the next project in "pending" status that has variants waiting
+  const { data: next } = await supabase
+    .from("projects")
+    .select("id, source_url, variant_count, type, batch_id")
+    .eq("user_id", userId)
+    .eq("status", "pending")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .single();
+
+  if (!next || !next.source_url) return;
+
+  // Check it actually has pending variants (not just a project with no work to do)
+  const { count } = await supabase
+    .from("variants")
+    .select("*", { count: "exact", head: true })
+    .eq("project_id", next.id)
+    .eq("status", "pending");
+
+  if ((count ?? 0) === 0) return;
+
+  console.log(`[auto-drain] Triggering next pending project: ${next.id}`);
+
+  const baseUrl = req.nextUrl.origin;
+  fetch(`${baseUrl}/api/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: req.headers.get("cookie") || "" },
+    body: JSON.stringify({
+      projectId: next.id,
+      sourceUrl: next.source_url,
+      variantCount: next.variant_count,
+      userId,
+      projectType: next.type || "video",
+    }),
+  }).catch((err) => {
+    console.error(`[auto-drain] Failed to trigger ${next.id}:`, err);
+  });
 }
