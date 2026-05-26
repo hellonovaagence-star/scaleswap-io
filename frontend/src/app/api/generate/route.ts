@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { generateAllVariants, acquireBrowser, releaseBrowser, closeBrowser, type CaptionOverlay } from "@/lib/video-engine";
-import { acquireSlot, releaseSlot } from "@/lib/server-queue";
+import { acquireSlot, releaseSlot, QueueFullError } from "@/lib/server-queue";
 import * as fs from "fs/promises";
 import { createWriteStream } from "fs";
 import * as path from "path";
@@ -97,8 +97,20 @@ export async function POST(req: NextRequest) {
   const sourceExt = path.extname(sourceUrlPath) || (isImage ? ".jpg" : ".mp4");
   const sourcePath = path.join(tmpDir, `source${sourceExt}`);
 
-  // Wait for a concurrency slot (max 3 projects generating simultaneously)
-  await acquireSlot();
+  // Wait for a concurrency slot (rejects with QueueFullError if queue is full)
+  try {
+    await acquireSlot();
+  } catch (err) {
+    if (err instanceof QueueFullError) {
+      // Mark project back to pending so retry-stuck can pick it up later
+      await supabase
+        .from("projects")
+        .update({ status: "pending" })
+        .eq("id", projectId);
+      return NextResponse.json({ error: "Server busy, try again later" }, { status: 429 });
+    }
+    throw err;
+  }
 
   // Register this project as using the shared Chrome browser
   acquireBrowser();

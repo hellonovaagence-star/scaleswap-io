@@ -1500,6 +1500,17 @@ export async function generateAllVariants(
     }
   }
 
+  // Close Chrome after caption pre-generation to free PIDs for FFmpeg.
+  // Caption PNGs are already saved to disk — Chrome is no longer needed.
+  // Without this, Chrome's multi-process model eats all container PIDs
+  // and FFmpeg fails with "Resource temporarily unavailable" (EAGAIN).
+  if (_browser) {
+    console.log("[generateAll] Closing Chrome after caption pre-gen to free PIDs for FFmpeg");
+    await _browser.close().catch(() => {});
+    _browser = null;
+    _browserLaunchPromise = null;
+  }
+
   // Sequential execution — process 1 variant at a time to avoid Chrome/FFmpeg crashes
   const CONCURRENCY = 1;
   const results: VariantResult[] = [];
