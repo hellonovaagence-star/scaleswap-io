@@ -51,6 +51,33 @@ import { resolveFfmpegPath } from "./ffmpeg-path";
 
 const execFileAsync = promisify(execFile);
 
+// ─── Local thermal-safety tuning ─────────────────────────────────────────────
+// FFmpeg (libx264) is multi-threaded and will grab every core. Running many
+// encodes in parallel — each spawning threads across all cores — pins a laptop
+// at 100% on every core and can thermal-throttle or hard-crash the machine.
+// We bound BOTH the number of parallel encodes AND the threads each encode may
+// use, so the machine warms up but always keeps headroom. All values are
+// env-tunable (no code change needed): raise for more speed, lower if it runs hot.
+const IS_PROD = process.env.NODE_ENV === "production";
+const CPU_COUNT = Math.max(1, os.cpus().length);
+
+function envInt(name: string, fallback: number): number {
+  const v = Number(process.env[name]);
+  return Number.isFinite(v) && v > 0 ? Math.floor(v) : fallback;
+}
+
+// Variants encoded in parallel per project. Prod stays at 1 (Docker PID limits).
+// Local default: 2 — a comfortable, crash-proof balance on a typical laptop.
+export const VARIANT_CONCURRENCY = IS_PROD ? 1 : envInt("SCALESWAP_CONCURRENCY", 2);
+
+// Per-FFmpeg thread cap. Sized so VARIANT_CONCURRENCY × threads stays near ~70%
+// of cores, leaving room for the OS, Chrome and thermal headroom. 0 = unbounded
+// (prod runs a single encode, so it can use everything).
+const TARGET_TOTAL_THREADS = Math.max(2, Math.floor(CPU_COUNT * 0.7));
+export const FFMPEG_THREADS = IS_PROD
+  ? 0
+  : envInt("SCALESWAP_FFMPEG_THREADS", Math.max(1, Math.floor(TARGET_TOTAL_THREADS / VARIANT_CONCURRENCY)));
+
 // ─── Mulberry32 PRNG ────────────────────────────────────────────────────────
 
 function mulberry32(seed: number) {
@@ -95,12 +122,17 @@ let _browserRefCount = 0;
 /** Kill all orphaned Chromium processes to prevent PID/thread exhaustion. */
 function killOrphanChrome(): void {
   try {
-    execSync("pkill -9 -f chromium || true", { stdio: "ignore", timeout: 5000 });
-    // Wait briefly for processes to die
+    if (process.platform === "darwin") {
+      // macOS: kill Puppeteer-spawned Chrome (match headless flag to avoid killing user's browser)
+      execSync("pkill -9 -f 'Google Chrome.*--headless' || true", { stdio: "ignore", timeout: 5000 });
+    } else {
+      // Linux/Alpine: Chromium binary
+      execSync("pkill -9 -f chromium || true", { stdio: "ignore", timeout: 5000 });
+    }
     execSync("sleep 0.3", { stdio: "ignore", timeout: 2000 });
-    console.log("[browser] Killed orphan Chromium processes");
+    console.log("[browser] Killed orphan Chrome/Chromium processes");
   } catch {
-    // Ignore — no chromium processes running
+    // Ignore — no processes running
   }
 }
 
@@ -180,6 +212,7 @@ async function getCaptionBrowser(): Promise<Browser> {
 
   // Wrap launch in a timeout to prevent infinite hangs that deadlock the queue
   const LAUNCH_TIMEOUT = 30_000;
+  const isMac = process.platform === "darwin";
   _browserLaunchPromise = Promise.race([
     puppeteer.launch({
       executablePath: resolveChromePath(),
@@ -192,8 +225,9 @@ async function getCaptionBrowser(): Promise<Browser> {
         "--disable-background-networking",
         "--disable-default-apps",
         "--disable-translate",
-        // Removed --single-process and --no-zygote: they cause Target closed
-        // errors with newer Chromium versions in Alpine containers
+        // macOS: single-process prevents dock icons + works fine (no PID limit)
+        // Linux/Alpine: multi-process required (single-process causes TargetCloseError)
+        ...(isMac ? ["--single-process", "--no-zygote"] : []),
       ],
     }),
     new Promise<never>((_, reject) =>
@@ -1254,6 +1288,11 @@ export function buildFfmpegCommand(
   // Layer 6: Codec variation
   cmd.push(...getCodecArgs(rng));
 
+  // Thermal-safety: cap encode threads so parallel variants don't peg every core
+  if (FFMPEG_THREADS > 0) {
+    cmd.push("-threads", String(FFMPEG_THREADS));
+  }
+
   // Output
   cmd.push(outputPath);
 
@@ -1504,15 +1543,19 @@ export async function generateAllVariants(
   // Caption PNGs are already saved to disk — Chrome is no longer needed.
   // Without this, Chrome's multi-process model eats all container PIDs
   // and FFmpeg fails with "Resource temporarily unavailable" (EAGAIN).
-  if (_browser) {
+  // Only in production — local dev has plenty of PIDs and multiple projects share Chrome.
+  if (_browser && process.env.NODE_ENV === "production") {
     console.log("[generateAll] Closing Chrome after caption pre-gen to free PIDs for FFmpeg");
     await _browser.close().catch(() => {});
     _browser = null;
     _browserLaunchPromise = null;
   }
 
-  // Sequential execution — process 1 variant at a time to avoid Chrome/FFmpeg crashes
-  const CONCURRENCY = 1;
+  // Parallel execution — bounded for thermal safety (see top-of-file tuning).
+  // Each FFmpeg is also thread-capped, so total load = CONCURRENCY × FFMPEG_THREADS
+  // stays well under 100% of cores. Tune via SCALESWAP_CONCURRENCY / SCALESWAP_FFMPEG_THREADS.
+  const CONCURRENCY = VARIANT_CONCURRENCY;
+  console.log(`[generateAll] Concurrency=${CONCURRENCY} variants, ${FFMPEG_THREADS || "auto"} threads/encode (${CPU_COUNT} cores)`);
   const results: VariantResult[] = [];
   let completed = 0;
 
