@@ -4,13 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 export async function updateSession(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Gate: require access code before anything else
-  const hasAccess = request.cookies.get("site-access")?.value === "granted";
-  if (!hasAccess && pathname !== "/gate" && !pathname.startsWith("/api/gate")) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/gate";
-    return NextResponse.redirect(url);
-  }
+  // Access-code gate removed — visitors land directly on the landing page.
 
   let supabaseResponse = NextResponse.next({ request });
 

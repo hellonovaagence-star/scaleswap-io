@@ -15,10 +15,14 @@ interface FlipCardProps {
 }
 
 // --- FlipCard Component ---
-const IMG_WIDTH = 60;
-const IMG_HEIGHT = 85;
+const IMG_WIDTH_DESKTOP = 60;
+const IMG_HEIGHT_DESKTOP = 85;
+const IMG_WIDTH_MOBILE = 44;
+const IMG_HEIGHT_MOBILE = 62;
 
-function FlipCard({ src, index, target }: FlipCardProps) {
+function FlipCard({ src, index, target, isMobile }: FlipCardProps & { isMobile?: boolean }) {
+    const w = isMobile ? IMG_WIDTH_MOBILE : IMG_WIDTH_DESKTOP;
+    const h = isMobile ? IMG_HEIGHT_MOBILE : IMG_HEIGHT_DESKTOP;
     return (
         <motion.div
             animate={{
@@ -31,8 +35,8 @@ function FlipCard({ src, index, target }: FlipCardProps) {
             transition={{ type: "spring", stiffness: 40, damping: 15 }}
             style={{
                 position: "absolute",
-                width: IMG_WIDTH,
-                height: IMG_HEIGHT,
+                width: w,
+                height: h,
                 transformStyle: "preserve-3d",
                 perspective: "1000px",
             }}
@@ -120,6 +124,10 @@ function StickyScene({ scrollProgress }: { scrollProgress: import("motion/react"
     const scrollRotate = useTransform(scrollProgress, [0.2, 1], [0, 360]);
     const smoothScrollRotate = useSpring(scrollRotate, { stiffness: 60, damping: 20 });
 
+    // End fade: clear the cards + text out before the section releases so the
+    // scroll experience ends clean instead of on a half-rotated arc.
+    const endFade = useTransform(scrollProgress, [0.78, 0.94], [1, 0]);
+
     // Mouse parallax
     const mouseX = useMotionValue(0);
     const smoothMouseX = useSpring(mouseX, { stiffness: 30, damping: 20 });
@@ -140,6 +148,7 @@ function StickyScene({ scrollProgress }: { scrollProgress: import("motion/react"
     const morphRef = useRef(0);
     const rotateRef = useRef(0);
     const parallaxRef = useRef(0);
+    const fadeRef = useRef(1);
     const [, forceRender] = useState(0);
 
     // Throttled update: only re-render when values change meaningfully
@@ -151,6 +160,7 @@ function StickyScene({ scrollProgress }: { scrollProgress: import("motion/react"
             morphRef.current = smoothMorph.get();
             rotateRef.current = smoothScrollRotate.get();
             parallaxRef.current = smoothMouseX.get();
+            fadeRef.current = endFade.get();
 
             const now = performance.now();
             if (now - lastRenderTime.current > 32) { // ~30fps max for card positions
@@ -161,13 +171,17 @@ function StickyScene({ scrollProgress }: { scrollProgress: import("motion/react"
         };
         rafId.current = requestAnimationFrame(update);
         return () => cancelAnimationFrame(rafId.current);
-    }, [smoothMorph, smoothScrollRotate, smoothMouseX]);
+    }, [smoothMorph, smoothScrollRotate, smoothMouseX, endFade]);
 
     const morphValue = morphRef.current;
     const rotateValue = rotateRef.current;
     const parallaxValue = parallaxRef.current;
+    const fadeValue = fadeRef.current;
 
-    const contentOpacity = useTransform(smoothMorph, [0.8, 1], [0, 1]);
+    const contentOpacity = useTransform([smoothMorph, endFade] as const, ([m, f]: number[]) => {
+        const reveal = Math.max(0, Math.min(1, (m - 0.8) / 0.2));
+        return reveal * f;
+    });
     const contentY = useTransform(smoothMorph, [0.8, 1], [20, 0]);
 
     return (
@@ -179,7 +193,7 @@ function StickyScene({ scrollProgress }: { scrollProgress: import("motion/react"
                         initial={{ opacity: 0, y: 20, filter: "blur(10px)" }}
                         animate={introPhase === "circle" && morphValue < 0.5 ? { opacity: 1 - morphValue * 2, y: 0, filter: "blur(0px)" } : { opacity: 0, filter: "blur(10px)" }}
                         transition={{ duration: 1 }}
-                        className="text-2xl md:text-4xl"
+                        className="text-[22px] leading-[1.2] md:text-4xl px-6"
                         style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em", color: "var(--color-ink)" }}
                     >
                         Your reels deserve to
@@ -213,15 +227,19 @@ function StickyScene({ scrollProgress }: { scrollProgress: import("motion/react"
                 </motion.div>
 
                 {/* Cards */}
-                <div className="relative flex items-center justify-center w-full h-full">
-                    {IMAGES.slice(0, TOTAL_IMAGES).map((src, i) => {
+                <div className="relative flex items-center justify-center w-full h-full overflow-hidden">
+                    {(() => {
+                        const isMobile = containerSize.width < 768;
+                        const cardCount = isMobile ? 16 : TOTAL_IMAGES;
+                        return IMAGES.slice(0, cardCount).map((src, i) => {
                         let target = { x: 0, y: 0, rotation: 0, scale: 1, opacity: 1 };
 
                         {
-                            const isMobile = containerSize.width < 768;
                             const minDimension = Math.min(containerSize.width, containerSize.height);
-                            const circleRadius = Math.min(minDimension * 0.35, 350);
-                            const circleAngle = (i / TOTAL_IMAGES) * 360;
+                            // Mobile: tighter ring (fits the portrait width) so the full circle
+                            // is visible like on desktop, with the intro text centered inside it.
+                            const circleRadius = Math.min(minDimension * (isMobile ? 0.42 : 0.35), 350);
+                            const circleAngle = (i / cardCount) * 360;
                             const circleRad = (circleAngle * Math.PI) / 180;
                             const circlePos = {
                                 x: Math.cos(circleRad) * circleRadius,
@@ -230,15 +248,19 @@ function StickyScene({ scrollProgress }: { scrollProgress: import("motion/react"
                             };
 
                             const baseRadius = Math.min(containerSize.width, containerSize.height * 1.5);
-                            const arcRadius = baseRadius * (isMobile ? 1.4 : 1.1);
-                            const arcApexY = containerSize.height * (isMobile ? 0.25 : 0.12);
+                            // Mobile: smaller radius + apex near center keeps the arc on-screen
+                            // instead of sweeping far below the fold as it rotates.
+                            const arcRadius = baseRadius * (isMobile ? 0.55 : 1.1);
+                            const arcApexY = containerSize.height * (isMobile ? -0.1 : 0.12);
                             const arcCenterY = arcApexY + arcRadius;
-                            const spreadAngle = isMobile ? 100 : 130;
+                            const spreadAngle = isMobile ? 110 : 130;
                             const startAngle = -90 - (spreadAngle / 2);
-                            const step = spreadAngle / (TOTAL_IMAGES - 1);
+                            const step = spreadAngle / (cardCount - 1);
 
                             const scrollProgressVal = Math.min(Math.max(rotateValue / 360, 0), 1);
-                            const maxRotation = spreadAngle * 0.8;
+                            // Mobile: only a subtle shuffle — a big rotation turns the small arc
+                            // lopsided and ugly before it fades out.
+                            const maxRotation = spreadAngle * (isMobile ? 0.16 : 0.8);
                             const boundedRotation = -scrollProgressVal * maxRotation;
 
                             const currentArcAngle = startAngle + (i * step) + boundedRotation;
@@ -248,7 +270,7 @@ function StickyScene({ scrollProgress }: { scrollProgress: import("motion/react"
                                 x: Math.cos(arcRad) * arcRadius + parallaxValue,
                                 y: Math.sin(arcRad) * arcRadius + arcCenterY,
                                 rotation: currentArcAngle + 90,
-                                scale: isMobile ? 1.4 : 1.8,
+                                scale: isMobile ? 1.0 : 1.8,
                             };
 
                             target = {
@@ -256,24 +278,102 @@ function StickyScene({ scrollProgress }: { scrollProgress: import("motion/react"
                                 y: lerp(circlePos.y, arcPos.y, morphValue),
                                 rotation: lerp(circlePos.rotation, arcPos.rotation, morphValue),
                                 scale: lerp(1, arcPos.scale, morphValue),
-                                opacity: 1,
+                                opacity: fadeValue,
                             };
                         }
 
                         return (
-                            <FlipCard key={i} src={src} index={i} total={TOTAL_IMAGES} phase={introPhase} target={target} />
+                            <FlipCard key={i} src={src} index={i} total={cardCount} phase={introPhase} target={target} isMobile={isMobile} />
                         );
-                    })}
+                    });
+                    })()}
                 </div>
             </div>
         </div>
     );
 }
 
-// --- Outer wrapper: tall div that drives scroll progress ---
+// --- Mobile: a single fixed "screen" of the circle, no scroll choreography ---
+function MobileCircleScene() {
+    const ref = useRef<HTMLDivElement>(null);
+    const [size, setSize] = useState({ width: 0, height: 0 });
+
+    useEffect(() => {
+        if (!ref.current) return;
+        const observer = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                setSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+            }
+        });
+        observer.observe(ref.current);
+        setSize({ width: ref.current.offsetWidth, height: ref.current.offsetHeight });
+        return () => observer.disconnect();
+    }, []);
+
+    const cardCount = 16;
+    const minDimension = Math.min(size.width, size.height) || 375;
+    const circleRadius = Math.min(minDimension * 0.42, 350);
+
+    return (
+        <div ref={ref} className="relative w-full overflow-hidden" style={{ height: "82vh", background: "var(--color-bg)" }}>
+            {/* Center text */}
+            <div className="absolute inset-0 z-0 flex flex-col items-center justify-center text-center px-6 pointer-events-none">
+                <h2 className="text-[22px] leading-[1.2]" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em", color: "var(--color-ink)" }}>
+                    Your reels deserve to
+                    <br />
+                    exist more than once.
+                </h2>
+            </div>
+
+            {/* Static ring of cards */}
+            <div className="absolute inset-0 flex items-center justify-center">
+                {IMAGES.slice(0, cardCount).map((src, i) => {
+                    const angle = (i / cardCount) * 360;
+                    const rad = (angle * Math.PI) / 180;
+                    const x = Math.cos(rad) * circleRadius;
+                    const y = Math.sin(rad) * circleRadius;
+                    const rotation = angle + 90;
+                    return (
+                        <div
+                            key={i}
+                            className="absolute overflow-hidden rounded-xl shadow-lg bg-gray-200"
+                            style={{
+                                width: IMG_WIDTH_MOBILE,
+                                height: IMG_HEIGHT_MOBILE,
+                                left: "50%",
+                                top: "50%",
+                                marginLeft: -IMG_WIDTH_MOBILE / 2,
+                                marginTop: -IMG_HEIGHT_MOBILE / 2,
+                                transform: `translate(${x}px, ${y}px) rotate(${rotation}deg)`,
+                            }}
+                        >
+                            <img src={src} alt={`reel-${i}`} className="h-full w-full object-cover" />
+                            <div className="absolute inset-0 bg-black/10" />
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
+// --- Outer wrapper: tall div that drives scroll progress (desktop) ---
 export default function IntroAnimation() {
     const wrapperRef = useRef<HTMLDivElement>(null);
     const { scrollYProgress } = useScroll({ target: wrapperRef, offset: ["start start", "end end"] });
+
+    const [isMobile, setIsMobile] = React.useState(false);
+    React.useEffect(() => {
+        const check = () => setIsMobile(window.innerWidth <= 768);
+        check();
+        window.addEventListener("resize", check);
+        return () => window.removeEventListener("resize", check);
+    }, []);
+
+    // On phones the scroll-driven morph is replaced by a single fixed circle screen.
+    if (isMobile) {
+        return <MobileCircleScene />;
+    }
 
     return (
         <div ref={wrapperRef} style={{ height: "500vh" }}>

@@ -29,13 +29,12 @@ export default function Topbar() {
 
       <div className="ml-auto">
         <a
-          href="https://discord.gg/t3ZjPbrFBY"
-          target="_blank"
-          rel="noopener noreferrer"
+          aria-disabled="true"
           className="inline-flex items-center gap-2 text-[12.5px] font-medium px-3.5 py-[7px] rounded-[9px] text-white transition-all duration-150 hover:-translate-y-0.5"
           style={{
             background: "var(--color-accent)",
             boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15), 0 2px 6px rgba(139,127,255,0.25)",
+            pointerEvents: "none",
           }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}

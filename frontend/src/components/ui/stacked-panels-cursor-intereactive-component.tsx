@@ -1,4 +1,4 @@
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useState, useEffect } from "react";
 import { motion, useSpring } from "motion/react";
 
 const PANEL_COUNT = 22;
@@ -62,17 +62,19 @@ function Panel({
   total,
   waveY,
   scaleY,
+  scale: sizeScale,
 }: {
   index: number;
   total: number;
   waveY: ReturnType<typeof useSpring>;
   scaleY: ReturnType<typeof useSpring>;
+  scale: number;
 }) {
   const t = index / (total - 1);
   const baseZ = (index - (total - 1)) * Z_SPREAD;
 
-  const w = 200 + t * 80;
-  const h = 280 + t * 120;
+  const w = (200 + t * 80) * sizeScale;
+  const h = (280 + t * 120) * sizeScale;
 
   const opacity = 0.25 + t * 0.75;
   const imageUrl = PANEL_IMAGES[index % PANEL_IMAGES.length];
@@ -118,6 +120,25 @@ function Panel({
 export default function StackedPanels() {
   const containerRef = useRef<HTMLDivElement>(null);
   const isHovering = useRef(false);
+  const [sizeScale, setSizeScale] = useState(1);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // On phones the cursor wave isn't reachable, so we tilt the scene to a
+  // narrower, frontal angle and recenter it so it sits inside the viewport.
+  const MOBILE_ROT_Y = -26;
+  const MOBILE_ROT_X = 12;
+
+  useEffect(() => {
+    const update = () => {
+      const w = containerRef.current?.offsetWidth ?? window.innerWidth;
+      const mobile = w < 500;
+      setSizeScale(mobile ? 0.62 : w < 768 ? 0.7 : 1);
+      setIsMobile(mobile);
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   const waveYSprings = Array.from({ length: PANEL_COUNT }, () =>
     // eslint-disable-next-line react-hooks/rules-of-hooks
@@ -132,8 +153,20 @@ export default function StackedPanels() {
   const rotY = useSpring(-42, SCENE_SPRING);
   const rotX = useSpring(18, SCENE_SPRING);
 
+  // Drive the resting tilt to the mobile-friendly angle (no hover on touch).
+  useEffect(() => {
+    if (isMobile) {
+      rotY.set(MOBILE_ROT_Y);
+      rotX.set(MOBILE_ROT_X);
+    } else {
+      rotY.set(-42);
+      rotX.set(18);
+    }
+  }, [isMobile, rotY, rotX]);
+
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      if (isMobile) return;
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
       isHovering.current = true;
@@ -162,12 +195,13 @@ export default function StackedPanels() {
   );
 
   const handleMouseLeave = useCallback(() => {
+    if (isMobile) return;
     isHovering.current = false;
     rotY.set(-42);
     rotX.set(18);
     waveYSprings.forEach((s) => s.set(0));
     scaleYSprings.forEach((s) => s.set(1));
-  }, [rotY, rotX, waveYSprings, scaleYSprings]);
+  }, [isMobile, rotY, rotX, waveYSprings, scaleYSprings]);
 
   return (
     <div
@@ -181,6 +215,7 @@ export default function StackedPanels() {
         style={{
           rotateY: rotY,
           rotateX: rotX,
+          x: isMobile ? -120 : 0,
           transformStyle: "preserve-3d",
           position: "relative",
           width: 0,
@@ -194,6 +229,7 @@ export default function StackedPanels() {
             total={PANEL_COUNT}
             waveY={waveYSprings[i]}
             scaleY={scaleYSprings[i]}
+            scale={sizeScale}
           />
         ))}
       </motion.div>

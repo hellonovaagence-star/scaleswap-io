@@ -8,6 +8,7 @@ import SmoothScroll from "@/components/SmoothScroll";
 import RevealSection from "@/components/RevealSection";
 import StackedPanels from "@/components/ui/stacked-panels-cursor-intereactive-component";
 import ScrollMorphHero from "@/components/ui/scroll-morph-hero";
+import { ContainerScroll } from "@/components/ui/container-scroll-animation";
 
 function FaqAccordion({ items }: { items: { q: string; a: string }[] }) {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
@@ -60,6 +61,8 @@ function FaqAccordion({ items }: { items: { q: string; a: string }[] }) {
 }
 
 export default function LandingPage() {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   // Force light mode on the landing page
   useEffect(() => {
     const el = document.documentElement;
@@ -70,6 +73,12 @@ export default function LandingPage() {
     };
   }, []);
 
+  // Lock body scroll while the mobile menu is open
+  useEffect(() => {
+    document.body.style.overflow = mobileMenuOpen ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [mobileMenuOpen]);
+
   return (
     <SmoothScroll>
       {/* NAV */}
@@ -78,13 +87,13 @@ export default function LandingPage() {
         backdropFilter: "blur(40px)",
         WebkitBackdropFilter: "blur(40px)",
       }}>
-        <div className="max-w-[1180px] mx-auto px-7 grid grid-cols-3 items-center h-16">
+        <div className="max-w-[1180px] mx-auto px-5 md:px-7 grid grid-cols-[auto_1fr_auto] md:grid-cols-3 items-center h-14 md:h-16">
           {/* Left: Logo */}
-          <div className="flex items-center gap-2 text-base" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
+          <Link href="#top" className="flex items-center gap-2 text-base" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
             <Image src="/scaleswap-logo.svg" alt="Scaleswap" width={22} height={22} />
             Scaleswap
-          </div>
-          {/* Center: Nav links */}
+          </Link>
+          {/* Center: Nav links (desktop) */}
           <ul className="hidden md:flex gap-7 list-none justify-center">
             {[
               { label: "Product", href: "#top" },
@@ -96,33 +105,109 @@ export default function LandingPage() {
               </li>
             ))}
           </ul>
-          {/* Right: Discord + CTA */}
-          <div className="flex items-center gap-2.5 justify-end">
-            <a href="https://discord.gg/t3ZjPbrFBY" target="_blank" rel="noopener noreferrer" className="hidden md:inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-[9px] transition-all duration-150" style={{ color: "var(--color-ink-2)" }}>
+          {/* Right: Discord + CTA (desktop) + hamburger (mobile) */}
+          <div className="flex items-center gap-2 md:gap-2.5 justify-end">
+            <a aria-disabled="true" className="hidden md:inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-[9px] transition-all duration-150" style={{ color: "var(--color-ink-2)", pointerEvents: "none" }}>
               <Image src="/discord-logo.png" alt="Discord" width={16} height={16} style={{ opacity: 0.7 }} />
               Discord
             </a>
-            <Link href="/signup" className="text-sm font-medium px-3.5 py-2.5 rounded-[9px] text-white transition-all duration-150" style={{
+            <Link href="/signup" className="text-[13px] md:text-sm font-medium px-3 md:px-3.5 py-2 md:py-2.5 rounded-[9px] text-white transition-all duration-150 whitespace-nowrap" style={{
               background: "var(--color-ink)",
               boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.1)",
             }}>
               Try for free
             </Link>
+            {/* Hamburger (mobile only) */}
+            <button
+              type="button"
+              aria-label="Toggle menu"
+              aria-expanded={mobileMenuOpen}
+              onClick={() => setMobileMenuOpen((v) => !v)}
+              className="md:hidden inline-flex items-center justify-center w-9 h-9 rounded-[9px] transition-colors"
+              style={{ border: "1px solid var(--color-border)", color: "var(--color-ink)" }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                {mobileMenuOpen
+                  ? <path d="M18 6L6 18M6 6l12 12" />
+                  : <><path d="M3 6h18" /><path d="M3 12h18" /><path d="M3 18h18" /></>}
+              </svg>
+            </button>
           </div>
         </div>
+
+        {/* Mobile menu panel */}
+        <AnimatePresence>
+          {mobileMenuOpen && (
+            <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => setMobileMenuOpen(false)}
+              className="md:hidden fixed inset-0 top-14 -z-10"
+              style={{ background: "rgba(11,11,10,0.18)" }}
+            />
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+              className="md:hidden absolute left-0 right-0 top-14 px-5 pb-5 pt-2"
+              style={{
+                background: "var(--color-bg)",
+                borderBottom: "1px solid var(--color-border)",
+                boxShadow: "0 12px 28px -12px rgba(11,11,10,0.18)",
+              }}
+            >
+              <ul className="flex flex-col list-none">
+                {[
+                  { label: "Product", href: "#top" },
+                  { label: "Pricing", href: "#pricing" },
+                  { label: "FAQ", href: "#faq" },
+                ].map((item) => (
+                  <li key={item.label}>
+                    <a
+                      href={item.href}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="block py-3 text-[15px] font-medium"
+                      style={{ color: "var(--color-ink)", borderBottom: "1px solid var(--color-border-soft)" }}
+                    >
+                      {item.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+              <a
+                aria-disabled="true"
+                onClick={() => setMobileMenuOpen(false)}
+                className="mt-4 flex items-center justify-center gap-2 text-sm font-medium py-3 rounded-xl text-white"
+                style={{
+                  background: "var(--color-accent)",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15), 0 4px 14px rgba(139,127,255,0.3)",
+                  pointerEvents: "none",
+                }}
+              >
+                <Image src="/discord-logo.png" alt="Discord" width={18} height={18} className="brightness-0 invert" />
+                Join Discord
+              </a>
+            </motion.div>
+            </>
+          )}
+        </AnimatePresence>
       </nav>
 
       {/* HERO */}
-      <section id="top" className="pt-[88px] pb-[60px] text-center relative overflow-hidden">
+      <section id="top" className="pt-14 md:pt-[88px] pb-4 md:pb-[60px] text-center relative overflow-hidden">
         <div className="absolute -top-[200px] left-1/2 w-[900px] h-[600px] -translate-x-1/2 pointer-events-none z-0"
           style={{ background: "radial-gradient(closest-side, rgba(139,127,255,0.14), transparent 70%)" }}
         />
-        <div className="relative z-10 max-w-[1180px] mx-auto px-7">
+        <div className="relative z-10 max-w-[1180px] mx-auto px-5 md:px-7">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0, ease: [0.16, 1, 0.3, 1] }}
-            className="inline-flex items-center gap-2.5 text-xs font-medium px-3 py-1.5 rounded-full mb-7" style={{
+            className="inline-flex items-center gap-2 md:gap-2.5 text-[11px] md:text-xs font-medium px-2.5 md:px-3 py-1.5 rounded-full mb-5 md:mb-7" style={{
             background: "var(--color-surface)",
             border: "1px solid var(--color-border)",
             color: "var(--color-ink-2)",
@@ -141,10 +226,10 @@ export default function LandingPage() {
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
-            className="mx-auto mb-6 max-w-[920px]" style={{
+            className="mx-auto mb-4 md:mb-6 max-w-[920px]" style={{
             fontFamily: "'Bricolage Grotesque', sans-serif",
             fontWeight: 600,
-            fontSize: "clamp(42px, 6.2vw, 76px)",
+            fontSize: "clamp(32px, 6.2vw, 76px)",
             lineHeight: 1.02,
             letterSpacing: "-0.035em",
           }}>
@@ -162,7 +247,7 @@ export default function LandingPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            className="text-lg mx-auto mb-9 max-w-[580px] font-normal" style={{
+            className="text-base md:text-lg mx-auto mb-7 md:mb-9 max-w-[580px] font-normal px-2 md:px-0" style={{
             color: "var(--color-muted)",
             lineHeight: 1.55,
           }}>
@@ -204,36 +289,34 @@ export default function LandingPage() {
             </div>
           </motion.div>
 
-          {/* Dashboard Preview */}
-          <RevealSection direction={60} delay={0.1} className="mt-12 relative hidden lg:block">
-            <div className="max-w-[960px] mx-auto rounded-2xl p-1.5 relative overflow-hidden" style={{
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              boxShadow: "0 20px 50px -16px rgba(11,11,10,0.16), 0 6px 16px rgba(11,11,10,0.05)",
-            }}>
-              <Image
-                src="/dashboard-v3.png"
-                alt="Scaleswap dashboard"
-                width={3024}
-                height={1854}
-                className="rounded-[14px] w-full h-auto"
-                priority
-              />
-            </div>
-          </RevealSection>
         </div>
       </section>
 
+      {/* Dashboard Preview with 3D Scroll */}
+      <ContainerScroll titleComponent={<></>}>
+        <Image
+          src="/dashboard-v3.png"
+          alt="Scaleswap dashboard"
+          width={3024}
+          height={1854}
+          className="mx-auto rounded-2xl object-cover h-full object-left-top w-full"
+          priority
+          draggable={false}
+        />
+      </ContainerScroll>
+
       {/* SCROLL MORPH */}
-      <ScrollMorphHero />
+      <div className="-mt-8 md:mt-0">
+        <ScrollMorphHero />
+      </div>
 
       {/* FEATURES */}
-      <section className="pt-40 pb-24" id="features">
-        <div className="max-w-[1180px] mx-auto px-7">
-          <RevealSection direction={50} className="mb-28">
-            <div className="grid lg:grid-cols-[2fr_3fr] gap-10 items-center">
+      <section className="pt-16 md:pt-40 pb-14 md:pb-24" id="features">
+        <div className="max-w-[1180px] mx-auto px-5 md:px-7">
+          <RevealSection direction={50} className="mb-14 md:mb-28">
+            <div className="grid lg:grid-cols-[2fr_3fr] gap-8 md:gap-10 items-center">
               <div>
-                <h2 className="tracking-tight mb-5" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, fontSize: "clamp(48px, 5.5vw, 72px)", letterSpacing: "-0.035em", lineHeight: 1.05 }}>
+                <h2 className="tracking-tight mb-4 md:mb-5" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, fontSize: "clamp(36px, 5.5vw, 72px)", letterSpacing: "-0.035em", lineHeight: 1.05 }}>
                   10+ layers of{" "}
                   <em className="not-italic" style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontStyle: "italic", color: "var(--color-accent)" }}>transformation</em>
                 </h2>
@@ -241,12 +324,12 @@ export default function LandingPage() {
                   Each variant goes through a multi-layer pipeline that makes it unique at the binary level, while preserving visual quality.
                 </p>
               </div>
-              <div className="h-[520px] overflow-hidden">
+              <div className="h-[300px] md:h-[520px] overflow-hidden">
                 <StackedPanels />
               </div>
             </div>
           </RevealSection>
-          <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5 md:gap-3">
             {[
               { icon: "01", title: "Binary", desc: "Header randomization & data chunk injection" },
               { icon: "02", title: "Metadata", desc: "Full scrubbing + fake device profiles" },
@@ -280,15 +363,15 @@ export default function LandingPage() {
 
       {/* HOW IT WORKS */}
       <RevealSection direction={50}>
-        <section className="py-28 relative overflow-hidden">
+        <section className="py-16 md:py-28 relative overflow-hidden">
           {/* Subtle background accent */}
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[500px] pointer-events-none" style={{
             background: "radial-gradient(ellipse, rgba(139,127,255,0.06) 0%, transparent 70%)",
           }} />
 
-          <div className="max-w-[1180px] mx-auto px-7 relative z-10">
-            <div className="text-center mb-16">
-              <h2 className="text-4xl md:text-5xl tracking-tight mb-4" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
+          <div className="max-w-[1180px] mx-auto px-5 md:px-7 relative z-10">
+            <div className="text-center mb-10 md:mb-16">
+              <h2 className="text-3xl md:text-5xl tracking-tight mb-4" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
                 From upload to post{" "}
                 <em className="not-italic" style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontStyle: "italic", color: "var(--color-accent)" }}>in seconds</em>.
               </h2>
@@ -297,7 +380,7 @@ export default function LandingPage() {
               </p>
             </div>
 
-            <div className="grid md:grid-cols-4 gap-5 mb-14 relative">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-5 mb-10 md:mb-14 relative">
               {/* Connecting line */}
               <div className="hidden md:block absolute top-[52px] left-[12%] right-[12%] h-px" style={{
                 background: "linear-gradient(90deg, transparent, var(--color-border), var(--color-accent-soft-2), var(--color-border), transparent)",
@@ -349,14 +432,14 @@ export default function LandingPage() {
 
       {/* BEFORE / AFTER */}
       <RevealSection direction={50}>
-        <section className="py-24">
-          <div className="max-w-[1180px] mx-auto px-7">
-            <div className="text-center mb-16">
+        <section className="py-14 md:py-24">
+          <div className="max-w-[1180px] mx-auto px-5 md:px-7">
+            <div className="text-center mb-10 md:mb-16">
               <span className="inline-block text-xs font-semibold uppercase tracking-wider mb-4 px-3 py-1.5 rounded-full" style={{
                 background: "var(--color-accent-soft)",
                 color: "var(--color-accent-hover)",
               }}>Why Scaleswap</span>
-              <h2 className="text-3xl md:text-5xl tracking-tight mb-4" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
+              <h2 className="text-2xl md:text-5xl tracking-tight mb-4" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
                 Stop wasting time.{" "}
                 <em className="not-italic" style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontStyle: "italic", color: "var(--color-accent)" }}>Start scaling</em>.
               </h2>
@@ -365,26 +448,26 @@ export default function LandingPage() {
               </p>
             </div>
 
-            <div className="grid md:grid-cols-2 gap-6 max-w-[960px] mx-auto">
+            <div className="grid md:grid-cols-2 gap-4 md:gap-6 max-w-[960px] mx-auto">
               {/* BEFORE */}
-              <div className="relative rounded-[20px] overflow-hidden" style={{
+              <div className="relative rounded-[16px] md:rounded-[20px] overflow-hidden" style={{
                 background: "linear-gradient(145deg, #FEFCFB 0%, #FFF5F2 100%)",
                 border: "1px solid rgba(238,90,36,0.12)",
                 boxShadow: "0 1px 3px rgba(238,90,36,0.04)",
               }}>
                 {/* Header */}
-                <div className="px-7 pt-7 pb-5">
+                <div className="px-5 md:px-7 pt-5 md:pt-7 pb-4 md:pb-5">
                   <div className="flex items-center gap-3 mb-1.5">
-                    <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(238,90,36,0.1)" }}>
+                    <div className="w-7 md:w-8 h-7 md:h-8 rounded-full flex items-center justify-center" style={{ background: "rgba(238,90,36,0.1)" }}>
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#E05A33" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </div>
-                    <span className="text-[18px] font-semibold tracking-tight" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", letterSpacing: "-0.03em" }}>Before</span>
+                    <span className="text-[16px] md:text-[18px] font-semibold tracking-tight" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", letterSpacing: "-0.03em" }}>Before</span>
                   </div>
-                  <p className="text-[12.5px] ml-11" style={{ color: "var(--color-muted)" }}>The manual grind</p>
+                  <p className="text-[12px] md:text-[12.5px] ml-10 md:ml-11" style={{ color: "var(--color-muted)" }}>The manual grind</p>
                 </div>
 
                 {/* Items */}
-                <div className="px-5 pb-6 space-y-2">
+                <div className="px-4 md:px-5 pb-5 md:pb-6 space-y-2">
                   {[
                     { metric: "4-5h", label: "per day", desc: "Editing & re-exporting variations manually" },
                     { metric: "~$800", label: "/month", desc: "Paying a freelancer just to duplicate content" },
@@ -407,7 +490,7 @@ export default function LandingPage() {
               </div>
 
               {/* AFTER */}
-              <div className="relative rounded-[20px] overflow-hidden" style={{
+              <div className="relative rounded-[16px] md:rounded-[20px] overflow-hidden" style={{
                 background: "linear-gradient(145deg, #FAFAFF 0%, #F3F1FF 100%)",
                 border: "1px solid rgba(139,127,255,0.2)",
                 boxShadow: "0 4px 24px -4px rgba(139,127,255,0.12), 0 1px 3px rgba(139,127,255,0.06)",
@@ -421,18 +504,18 @@ export default function LandingPage() {
                 </div>
 
                 {/* Header */}
-                <div className="px-7 pt-7 pb-5">
+                <div className="px-5 md:px-7 pt-5 md:pt-7 pb-4 md:pb-5">
                   <div className="flex items-center gap-3 mb-1.5">
-                    <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "var(--color-accent-soft)", boxShadow: "0 0 0 3px rgba(139,127,255,0.08)" }}>
+                    <div className="w-7 md:w-8 h-7 md:h-8 rounded-full flex items-center justify-center" style={{ background: "var(--color-accent-soft)", boxShadow: "0 0 0 3px rgba(139,127,255,0.08)" }}>
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                     </div>
-                    <span className="text-[18px] font-semibold tracking-tight" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", letterSpacing: "-0.03em" }}>After</span>
+                    <span className="text-[16px] md:text-[18px] font-semibold tracking-tight" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", letterSpacing: "-0.03em" }}>After</span>
                   </div>
-                  <p className="text-[12.5px] ml-11" style={{ color: "var(--color-accent-hover)" }}>The Scaleswap way</p>
+                  <p className="text-[12px] md:text-[12.5px] ml-10 md:ml-11" style={{ color: "var(--color-accent-hover)" }}>The Scaleswap way</p>
                 </div>
 
                 {/* Items */}
-                <div className="px-5 pb-6 space-y-2">
+                <div className="px-4 md:px-5 pb-5 md:pb-6 space-y-2">
                   {[
                     { metric: "+5h", label: "saved / day", desc: "Generate all variants in under a minute" },
                     { metric: "$0", label: "/month", desc: "No freelancer needed — Scaleswap does it all" },
@@ -460,14 +543,14 @@ export default function LandingPage() {
 
       {/* REVIEWS */}
       <RevealSection direction={50}>
-        <section className="py-24" style={{ background: "var(--color-surface)" }}>
-          <div className="max-w-[1180px] mx-auto px-7">
-            <div className="text-center mb-14">
+        <section className="py-14 md:py-24" style={{ background: "var(--color-surface)" }}>
+          <div className="max-w-[1180px] mx-auto px-5 md:px-7">
+            <div className="text-center mb-10 md:mb-14">
               <span className="inline-block text-xs font-semibold uppercase tracking-wider mb-4 px-3 py-1.5 rounded-full" style={{
                 background: "var(--color-accent-soft)",
                 color: "var(--color-accent-hover)",
               }}>Reviews</span>
-              <h2 className="text-3xl md:text-5xl tracking-tight mb-4" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
+              <h2 className="text-2xl md:text-5xl tracking-tight mb-4" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
                 Loved by{" "}
                 <em className="not-italic" style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontStyle: "italic", color: "var(--color-accent)" }}>creators</em>{" "}
                 💜
@@ -477,7 +560,7 @@ export default function LandingPage() {
               </p>
             </div>
 
-            <div className="grid md:grid-cols-3 gap-5 max-w-[1000px] mx-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-5 max-w-[1000px] mx-auto">
               {[
                 {
                   name: "Marc D.",
@@ -569,21 +652,21 @@ export default function LandingPage() {
 
       {/* PRICING */}
       <RevealSection direction={50}>
-        <section className="py-24" id="pricing">
-          <div className="max-w-[1180px] mx-auto px-7">
-            <div className="text-center mb-14">
+        <section className="py-14 md:py-24" id="pricing">
+          <div className="max-w-[1180px] mx-auto px-5 md:px-7">
+            <div className="text-center mb-10 md:mb-14">
               <span className="inline-block text-xs font-semibold uppercase tracking-wider mb-4 px-3 py-1.5 rounded-full" style={{
                 background: "var(--color-accent-soft)",
                 color: "var(--color-accent-hover)",
               }}>Pricing</span>
-              <h2 className="text-3xl md:text-4xl tracking-tight mb-3" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
+              <h2 className="text-2xl md:text-4xl tracking-tight mb-3" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
                 Scaleswap is currently{" "}
                 <em className="not-italic" style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontStyle: "italic", color: "var(--color-accent)" }}>free</em>.
               </h2>
               <p className="text-base" style={{ color: "var(--color-muted)" }}>Get full access at no cost — no credit card required.</p>
             </div>
 
-            <div className="grid md:grid-cols-3 gap-5 max-w-[960px] mx-auto">
+            <div className="grid md:grid-cols-3 gap-4 md:gap-5 max-w-[960px] mx-auto">
               {/* Starter */}
               <div className="relative p-6 rounded-2xl flex flex-col" style={{
                 background: "var(--color-surface)",
@@ -647,9 +730,9 @@ export default function LandingPage() {
 
       {/* FAQ */}
       <RevealSection direction={50}>
-        <section className="py-24" id="faq">
-          <div className="max-w-[680px] mx-auto px-7">
-            <h2 className="text-3xl md:text-4xl tracking-tight mb-12 text-center" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
+        <section className="py-14 md:py-24" id="faq">
+          <div className="max-w-[680px] mx-auto px-5 md:px-7">
+            <h2 className="text-2xl md:text-4xl tracking-tight mb-8 md:mb-12 text-center" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
               Frequently asked{" "}
               <em className="not-italic" style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontStyle: "italic", color: "var(--color-accent)" }}>questions</em>
             </h2>
@@ -667,14 +750,14 @@ export default function LandingPage() {
 
       {/* CTA */}
       <RevealSection direction={50}>
-        <section className="py-32">
-          <div className="max-w-[1180px] mx-auto px-7 text-center">
-            <h2 className="text-5xl md:text-6xl tracking-tight mb-6" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
+        <section className="py-16 md:py-32">
+          <div className="max-w-[1180px] mx-auto px-5 md:px-7 text-center">
+            <h2 className="text-3xl md:text-6xl tracking-tight mb-5 md:mb-6" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
               Ready to{" "}
               <em className="not-italic" style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontStyle: "italic", color: "var(--color-accent)" }}>scale</em>
               {" "}your content?
             </h2>
-            <p className="text-lg max-w-lg mx-auto mb-10" style={{ color: "var(--color-muted)" }}>
+            <p className="text-base md:text-lg max-w-lg mx-auto mb-8 md:mb-10" style={{ color: "var(--color-muted)" }}>
               Get started for free. No credit card required.
             </p>
             <Link href="/upload" className="inline-flex items-center gap-2.5 text-base font-medium px-8 py-4 rounded-xl text-white transition-all duration-150 hover:-translate-y-0.5" style={{
@@ -689,9 +772,9 @@ export default function LandingPage() {
       </RevealSection>
 
       {/* FOOTER */}
-      <footer className="pt-16 pb-10" style={{ borderTop: "1px solid var(--color-border-soft)" }}>
-        <div className="max-w-[1180px] mx-auto px-7">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-10 mb-14">
+      <footer className="pt-12 md:pt-16 pb-8 md:pb-10" style={{ borderTop: "1px solid var(--color-border-soft)" }}>
+        <div className="max-w-[1180px] mx-auto px-5 md:px-7">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 md:gap-10 mb-10 md:mb-14">
             {/* Brand */}
             <div className="col-span-2 md:col-span-1">
               <div className="flex items-center gap-2 text-sm mb-3" style={{ fontFamily: "'Bricolage Grotesque', sans-serif", fontWeight: 600, letterSpacing: "-0.035em" }}>
@@ -715,9 +798,10 @@ export default function LandingPage() {
             {/* Community */}
             <div>
               <h4 className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--color-muted)" }}>Community</h4>
-              <a href="https://discord.gg/t3ZjPbrFBY" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2.5 text-sm font-medium px-5 py-3 rounded-xl text-white transition-all duration-150 hover:-translate-y-0.5" style={{
+              <a aria-disabled="true" className="inline-flex items-center justify-center gap-2.5 text-sm font-medium px-4 py-3 rounded-xl text-white transition-all duration-150 hover:-translate-y-0.5 whitespace-nowrap w-full sm:w-auto" style={{
                 background: "var(--color-accent)",
                 boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15), -4px 4px 14px rgba(139,127,255,0.4), -8px 8px 28px rgba(139,127,255,0.18)",
+                pointerEvents: "none",
               }}>
                 <Image src="/discord-logo.png" alt="Discord" width={20} height={20} className="brightness-0 invert" />
                 Join Discord
